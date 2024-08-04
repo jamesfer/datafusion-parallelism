@@ -1,0 +1,35 @@
+[package]
+name = "datafusion-parallelism"
+version = "0.1.0"
+edition = "2021"
+autobenches = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+datafusion = "40.0.0"
+datafusion-common = "40.0.0"
+datafusion-physical-expr = "40.0.0"
+datafusion-physical-plan = "40.0.0"
+tokio = { version = "1.39.2", features = ["rt", "rt-multi-thread", "macros"] }
+futures-core = "0.3.30"
+boxcar = "0.2.5"
+dashmap = { version = "6.0.1", features = ["raw-api"] }
+crossbeam = "0.8.4"
+futures = "0.3.30"
+ahash = "0.8.11"
+flume = "0.11.0"
+cpuprofiler = "0.0.4"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+pprof = { version = "0.13.0", features = ["flamegraph"] }
+
+[[bench]]
+name = "my_benchmark"
+harness = false
+
+#[[bin]]
+#name = "cool-tool"
+#test = false
+#bench = false
