@@ -3,6 +3,8 @@ pub mod parse_sql;
 mod use_parallel_join_rule;
 mod inner_hash_join;
 mod utils;
+mod parallel_join;
+mod parallel_join_execution_state;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
