@@ -8,20 +8,24 @@ use datafusion::datasource::streaming::StreamingTable;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::execution::context::SessionState;
 use datafusion_common::DataFusionError;
-use datafusion_physical_plan::{collect, ExecutionPlan};
+use datafusion_physical_plan::collect;
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion_physical_plan::streaming::PartitionStream;
-use tokio::runtime::Runtime;
+use datafusion_parallelism::api_utils::{make_int_array, make_string_constant_array};
 
-use datafusion_parallelism::parse_sql::{make_session_state, parse_sql};
+use datafusion_parallelism::parse_sql::{JoinReplacement, make_session_state, parse_sql};
 
 #[tokio::main]
 async fn main() {
-    let session_state = make_session_state(false);
+    let session_state = make_session_state(None);
     register_tables(&session_state);
     run_plan(&session_state).await;
 
-    let session_state = make_session_state(true);
+    let session_state = make_session_state(Some(JoinReplacement::Original));
+    register_tables(&session_state);
+    run_plan(&session_state).await;
+
+    let session_state = make_session_state(Some(JoinReplacement::New));
     register_tables(&session_state);
     run_plan(&session_state).await;
 }
@@ -69,11 +73,11 @@ fn register_tables(session_state: &SessionState) {
                 RecordBatch::try_new(
                     base_table_schema.clone(),
                     vec![
-                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024)),
-                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024)),
-                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024)),
-                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024)),
-                        Arc::new(make_string_array("hello".to_string(), 1024)),
+                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 0)),
+                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 0)),
+                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 0)),
+                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 0)),
+                        Arc::new(make_string_constant_array("hello".to_string(), 1024)),
                     ],
                 ).unwrap()
             })
@@ -93,8 +97,8 @@ fn register_tables(session_state: &SessionState) {
                     RecordBatch::try_new(
                         small_table_schema.clone(),
                         vec![
-                            Arc::new(make_int_array(i * 1024, (i + 1) * 1024)),
-                            Arc::new(make_string_array("world".to_string(), 1024)),
+                            Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 0)),
+                            Arc::new(make_string_constant_array("world".to_string(), 1024)),
                         ],
                     ).unwrap()
                 })
@@ -114,14 +118,6 @@ fn register_tables(session_state: &SessionState) {
         .map_err(|err| format!("register schema error: {}", err))
         .unwrap();
     session_state.catalog_list().register_catalog("my_catalog".to_string(), catalog);
-}
-
-fn make_int_array(min: i32, max: i32) -> Int32Array {
-    Int32Array::from((min..max).collect::<Vec<_>>())
-}
-
-fn make_string_array(value: String, count: i32) -> StringArray {
-    StringArray::from((0..count).map(|_| value.clone()).collect::<Vec<_>>())
 }
 
 struct StaticPartitionStream {

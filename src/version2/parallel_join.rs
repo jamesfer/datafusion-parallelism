@@ -1,16 +1,17 @@
-use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties};
-use std::sync::{Arc, OnceLock};
-use datafusion_physical_expr::{Distribution, EquivalenceProperties, Partitioning, PhysicalExprRef};
-use datafusion_common::{DataFusionError, JoinType};
-use std::fmt::{Debug, Formatter};
-use datafusion_physical_plan::joins::{HashJoinExec, PartitionMode};
 use std::any::Any;
+use std::fmt::{Debug, Formatter};
+use std::sync::{Arc, OnceLock};
+
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
+use datafusion_common::{DataFusionError, JoinType};
+use datafusion_physical_expr::{Distribution, EquivalenceProperties, Partitioning, PhysicalExprRef};
+use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties};
+use datafusion_physical_plan::joins::{HashJoinExec, PartitionMode};
 use datafusion_physical_plan::joins::utils::build_join_schema;
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use futures::TryFutureExt;
-use crate::inner_hash_join::inner_join_stream;
-use crate::parallel_join_execution_state::ParallelJoinExecutionState;
+use crate::version2::inner_hash_join::inner_join_stream;
+use crate::version2::parallel_join_execution_state::ParallelJoinExecutionState;
 
 #[derive(Debug)]
 pub struct ParallelJoin {
@@ -146,8 +147,6 @@ impl ExecutionPlan for ParallelJoin {
                         on,
                         state.join_map,
                         state.batch_list,
-                        state.compacted_join_map_sender,
-                        state.compacted_join_map_receiver,
                     ).await
                 };
                 Ok(Box::pin(RecordBatchStreamAdapter::new(schema, s.try_flatten_stream())))

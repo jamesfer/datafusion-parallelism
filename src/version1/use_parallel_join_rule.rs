@@ -1,15 +1,13 @@
 use std::fmt::Debug;
 use std::sync::Arc;
-use crossbeam::atomic::AtomicCell;
-use datafusion::arrow::record_batch::RecordBatch;
+
 use datafusion::physical_optimizer::PhysicalOptimizerRule;
 use datafusion_common::config::ConfigOptions;
 use datafusion_common::DataFusionError;
 use datafusion_common::tree_node::{Transformed, TreeNode};
 use datafusion_physical_plan::ExecutionPlan;
 use datafusion_physical_plan::joins::HashJoinExec;
-use crate::parallel_join::ParallelJoin;
-use crate::utils::concurrent_join_map::{ConcurrentJoinMap, ReadOnlyJoinMap};
+use crate::version1::parallel_join::ParallelJoin;
 
 pub struct UseParallelJoinRule;
 
