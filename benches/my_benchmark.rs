@@ -59,8 +59,8 @@ impl Profiler for MyProfiler {
 
 fn make_config() -> Criterion {
     Criterion::default()
-        .warm_up_time(Duration::from_secs(10))
-        .measurement_time(Duration::from_secs(30))
+        .warm_up_time(Duration::from_secs(30))
+        .measurement_time(Duration::from_secs(300))
         // .with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))
         .with_profiler(MyProfiler::new())
 }
@@ -274,7 +274,7 @@ impl BenchmarkQuery for MuchLargerProbeSize {
     }
 }
 
-async fn prepare_query(session_state: &SessionState, sql: &str) -> Box<fn() -> BoxFuture<()>> {
+async fn prepare_query<'a>(session_state: &'a SessionState, sql: &str) -> Box<dyn FnMut() -> BoxFuture<'a, ()> + 'a> {
     let logical_plan = session_state.create_logical_plan(sql).await.unwrap();
 
     Box::new(move || {
