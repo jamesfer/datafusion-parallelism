@@ -1,9 +1,9 @@
 mod sql_planner;
 pub mod parse_sql;
 mod utils;
-mod version1;
-mod version2;
-mod version3;
+pub mod version1;
+pub mod version2;
+pub mod version3;
 pub mod api_utils;
 
 pub fn add(left: usize, right: usize) -> usize {

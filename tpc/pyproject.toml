@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "tpc"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+argparse = "^1.4.0"
+pyarrow = "^17.0.0"
+datafusion = "^39.0.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

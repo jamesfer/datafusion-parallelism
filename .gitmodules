@@ -1,0 +1,3 @@
+[submodule "tpc/datafusion-benchmarks"]
+	path = tpc/datafusion-benchmarks
+	url = https://github.com/apache/datafusion-benchmarks.git
