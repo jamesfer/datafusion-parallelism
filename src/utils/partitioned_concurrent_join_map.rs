@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::mem;
 use std::sync::{Arc, Mutex, OnceLock};
+use crate::utils::index_lookup::IndexLookup;
 
 use crate::utils::limited_rc::LimitedRc;
 use crate::utils::once_notify;
@@ -301,9 +302,11 @@ pub struct ReadonlyPartitionedConcurrentJoinMap {
     shards: Vec<Arc<Segment>>,
 }
 
-impl ReadonlyPartitionedConcurrentJoinMap {
-    pub fn get_iter(&self, hash: u64) -> impl Iterator<Item=usize> + '_ {
-        let shard_number = determine_shard(hash, self.shards.len());
+impl IndexLookup<u64> for ReadonlyPartitionedConcurrentJoinMap {
+    type It<'a> = ReadOnlyJoinMapIterator<'a>;
+
+    fn get_iter<'a>(&'a self, hash: &'a u64) -> Self::It<'a> {
+        let shard_number = determine_shard(*hash, self.shards.len());
         let shard = &self.shards[shard_number];
         let (local_index, global_index) = shard.lookup.get(&hash)
             .map(|indexes| *indexes)
@@ -311,6 +314,7 @@ impl ReadonlyPartitionedConcurrentJoinMap {
         ReadOnlyJoinMapIterator::new(local_index, global_index, &shard.buffer)
     }
 }
+
 
 pub struct ReadOnlyJoinMapIterator<'a> {
     local_index: usize,
@@ -376,6 +380,7 @@ mod tests {
     use futures::StreamExt;
     use rand::random;
     use tokio::spawn;
+    use crate::utils::index_lookup::IndexLookup;
 
     use crate::utils::partitioned_concurrent_join_map::create_writable_join_map;
 
@@ -391,7 +396,7 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         for read_only_map in read_only_maps.iter() {
-            assert_eq!(read_only_map.get_iter(1).collect::<Vec<usize>>(), Vec::<usize>::new());
+            assert_eq!(read_only_map.get_iter(&1).collect::<Vec<usize>>(), Vec::<usize>::new());
         }
     }
 
@@ -410,8 +415,8 @@ mod tests {
             .unwrap();
 
         for read_only_map in read_only_maps.iter() {
-            assert_eq!(read_only_map.get_iter(1).collect::<Vec<usize>>(), vec![2, 0]);
-            assert_eq!(read_only_map.get_iter(2).collect::<Vec<usize>>(), vec![3, 1]);
+            assert_eq!(read_only_map.get_iter(&1).collect::<Vec<usize>>(), vec![2, 0]);
+            assert_eq!(read_only_map.get_iter(&2).collect::<Vec<usize>>(), vec![3, 1]);
         }
     }
 
@@ -431,8 +436,8 @@ mod tests {
             .unwrap();
 
         for read_only_map in read_only_maps.iter() {
-            assert_eq!(read_only_map.get_iter(1).collect::<Vec<usize>>(), vec![6, 2, 0]);
-            assert_eq!(read_only_map.get_iter(2).collect::<Vec<usize>>(), vec![5, 3, 1]);
+            assert_eq!(read_only_map.get_iter(&1).collect::<Vec<usize>>(), vec![6, 2, 0]);
+            assert_eq!(read_only_map.get_iter(&2).collect::<Vec<usize>>(), vec![5, 3, 1]);
         }
     }
 

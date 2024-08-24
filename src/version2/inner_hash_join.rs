@@ -1,21 +1,58 @@
 use std::future::ready;
+use std::sync::Arc;
 
-use ahash::RandomState;
-use datafusion::arrow;
-use datafusion::arrow::array::{ArrayRef, PrimitiveArray, RecordBatch, UInt32Array, UInt32BufferBuilder};
-use datafusion::arrow::buffer::ScalarBuffer;
+use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::error::ArrowError;
 use datafusion::execution::RecordBatchStream;
-use datafusion_common::DataFusionError;
+use datafusion_common::{DataFusionError, JoinType};
 use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_plan::SendableRecordBatchStream;
 use futures::{StreamExt, TryStreamExt};
 use futures_core::stream::Stream;
+use crate::operator::build_implementation::IndexLookupConsumer;
+use crate::shared::shared::{calculate_hash, evaluate_expressions};
+use crate::shared::streaming_probe_lookup::streaming_probe_lookup;
 
 use crate::utils::limited_rc::LimitedRc;
 use crate::utils::partitioned_concurrent_join_map::{ReadonlyPartitionedConcurrentJoinMap, WritablePartitionedConcurrentJoinMap};
+use crate::version2::parallel_join_execution_state::ParallelJoinExecutionState;
+
+#[derive(Debug)]
+pub struct Version2 {
+    state: ParallelJoinExecutionState,
+}
+
+impl Version2 {
+    pub fn new(parallelism: usize) -> Self {
+        Self {
+            state: ParallelJoinExecutionState::new(parallelism),
+        }
+    }
+
+    pub async fn build_right_side<C>(
+        &self,
+        partition: usize,
+        stream: SendableRecordBatchStream,
+        build_expressions: &Vec<PhysicalExprRef>,
+        consume: C
+    ) -> Result<C::R, DataFusionError>
+        where C: IndexLookupConsumer + Send {
+        let state = self.state.take(partition)
+            .ok_or(DataFusionError::Internal(format!("State already consumed for partition {}", partition)))?;
+
+        let right_schema = stream.schema().clone();
+        consume_build_side(stream, &state.join_map, &build_expressions, &state.batch_list).await?;
+
+        let (build_side_records, read_only_join_map) = compact_join_map(
+            &right_schema,
+            state.join_map,
+            &state.batch_list,
+        ).await?;
+
+        Ok(consume.call(read_only_join_map, build_side_records))
+    }
+}
 
 pub async fn inner_join_stream(
     join_schema: SchemaRef,
@@ -37,23 +74,7 @@ pub async fn inner_join_stream(
     ).await?;
 
     // Stream left side
-    Ok(left.map(move |result_probe_batch| -> Result<RecordBatch, DataFusionError> {
-        let probe_batch = result_probe_batch?;
-
-        // Hash the probe values
-        let probe_keys = evaluate_expressions(&probe_expressions, &probe_batch)?;
-        let probe_hashes = calculate_hash(&probe_keys)?;
-
-        // Find matching rows from build side
-        let (probe_indices, build_indices) = get_matching_indices(&probe_hashes, &read_only_join_map);
-
-        let output_columns = probe_batch.columns().iter()
-            .map(|array| arrow::compute::take(array, &probe_indices, None))
-            .chain(build_side_records.columns().iter()
-                .map(|array| arrow::compute::take(array, &build_indices, None)))
-            .collect::<Result<Vec<ArrayRef>, ArrowError>>()?;
-        return Ok(RecordBatch::try_new(join_schema.clone(), output_columns)?);
-    }))
+    Ok(streaming_probe_lookup(JoinType::Inner, join_schema, left, probe_expressions, build_side_records, read_only_join_map))
 }
 
 async fn consume_build_side(
@@ -79,7 +100,6 @@ fn process_input_batch(
     expressions: &Vec<PhysicalExprRef>,
     batch_list: &boxcar::Vec<(usize, RecordBatch)>,
 ) -> Result<(), DataFusionError> {
-    let size = input.num_rows();
     let keys = evaluate_expressions(expressions, &input)?;
     let hashes = calculate_hash(&keys)?;
 
@@ -91,37 +111,6 @@ fn process_input_batch(
     // Add the record batch to the list
     batch_list.push((buffer_index, input));
     Ok(())
-}
-
-pub fn calculate_hash(values: &Vec<ArrayRef>) -> Result<Vec<u64>, ArrowError> {
-    let capacity = values.get(0).map(|array| array.len()).unwrap_or(0);
-    let mut probe_hashes = vec![0; capacity];
-    datafusion_common::hash_utils::create_hashes(&values, &RandomState::with_seed(0), &mut probe_hashes)?;
-    Ok(probe_hashes)
-}
-
-pub fn evaluate_expressions(expressions: &Vec<PhysicalExprRef>, batch: &RecordBatch) -> Result<Vec<ArrayRef>, DataFusionError> {
-    expressions.iter()
-        .map(|expression| expression.evaluate(batch)?.into_array(batch.num_rows()))
-        .collect::<datafusion_common::Result<Vec<_>>>()
-}
-
-pub fn get_matching_indices(probe_hashes: &Vec<u64>, join_map: &ReadonlyPartitionedConcurrentJoinMap) -> (UInt32Array, UInt32Array) {
-    let mut probe_indices = UInt32BufferBuilder::new(0);
-    let mut build_indices = UInt32BufferBuilder::new(0);
-    for (probe_index, hash) in probe_hashes.iter().enumerate() {
-        // Append all the matching build indices
-        let mut matching_count = 0;
-        for matching_build_index in join_map.get_iter(*hash) {
-            build_indices.append(matching_build_index as u32);
-            matching_count += 1;
-        }
-        probe_indices.append_n(matching_count, probe_index as u32);
-    }
-
-    let probe_indices: UInt32Array = PrimitiveArray::new(ScalarBuffer::from(probe_indices.finish()), None);
-    let build_indices: UInt32Array = PrimitiveArray::new(ScalarBuffer::from(build_indices.finish()), None);
-    (probe_indices, build_indices)
 }
 
 async fn compact_join_map(
@@ -158,105 +147,3 @@ async fn compact_join_map(
     // Return the state
     Ok((output_batch, read_only_join_map))
 }
-
-
-
-
-
-// ----------------------------------------------------
-
-// pub struct InnerHashLookupDriver {
-//     build_side: ReceivedValue<(RecordBatch, ReadOnlyJoinMap<u64>)>,
-//     probe_side_input: DriverStreamInput<RecordBatch>,
-//     probe_expressions: Vec<PhysicalExprRef>,
-//     output_schema: SchemaRef,
-//     output: DriverStreamOutput<RecordBatch>,
-// }
-//
-// impl InnerHashLookupDriver {
-//     fn as_record_batch_stream(&self) -> impl RecordBatchStream {
-//         RecordBatchStreamAdapter::new(self.output_schema.clone(), self.execute_as_stream())
-//     }
-//
-//     fn execute_as_stream(&self) -> impl Stream<Item=Result<RecordBatch, DataFusionError>> {
-//
-//     }
-// }
-//
-// // pub trait SimpleIntoRecordBatchStream {
-// //     fn make_stream(&self) -> impl Stream<Item=Result<RecordBatch, DataFusionError>>;
-// //
-// //     fn schema(&self) -> SchemaRef;
-// // }
-// //
-// // impl Into<dyn RecordBatchStream> for SimpleIntoRecordBatchStream {
-// //
-// // }
-//
-// // impl Stream<Item=Result<RecordBatch, DataFusionError>> for InnerHashLookupDriver {
-// //     type Item = Result<RecordBatch, DataFusionError>;
-// //
-// //     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-// //         todo!()
-// //     }
-// // }
-//
-// impl RecordBatchStream for InnerHashLookupDriver {
-//     fn schema(&self) -> SchemaRef {
-//         Arc::clone(&self.schema)
-//     }
-// }
-//
-// fn process_probe_batch(
-//     join_map: &ReadOnlyJoinMap<u64>,
-//     build_side_records: &RecordBatch,
-//     probe_batch: &RecordBatch,
-//     probe_expressions: &Vec<PhysicalExprRef>,
-//     output_schema: &SchemaRef,
-//     output: &DriverStreamOutput<RecordBatch>,
-// ) -> Result<(), DriverError> {
-//     // Hash the probe values
-//     let probe_keys = evaluate_expressions(probe_expressions, &probe_batch)?;
-//     let probe_hashes = calculate_hash(&probe_keys)?;
-//
-//     // Find matching rows from build side
-//     let (probe_indices, build_indices) = get_matching_indices(&probe_hashes, join_map);
-//
-//     // TODO check for hash collisions
-//
-//     // Extract the rows matching the indices
-//     let output_columns = probe_batch.columns().iter()
-//         .map(|array| arrow::compute::take(array, &probe_indices, None))
-//         .chain(build_side_records.columns().iter()
-//             .map(|array| arrow::compute::take(array, &build_indices, None)))
-//         .collect::<Result<Vec<ArrayRef>, ArrowError>>()?;
-//     let output_batch = RecordBatch::try_new(output_schema.clone(), output_columns)?;
-//     output.send(output_batch)?;
-//
-//     Ok(())
-// }
-//
-// impl Driver for InnerHashLookupDriver {
-//     fn run(&mut self, channel: usize) -> Result<(), DriverError> {
-//         // Check the result of the build side
-//         let (build_side_records, join_map) = match self.build_side.get() {
-//             ReceivedContents::Empty => return Err(DriverError::NothingToProcess),
-//             // TODO this should really be treated as a cancelled
-//             ReceivedContents::Disconnected => return Err(DriverError::Finished),
-//             ReceivedContents::Value(build_side) => build_side
-//         };
-//
-//         match pull_next_input(&self.probe_side_input) {
-//             NextInput::Empty => Err(DriverError::NothingToProcess),
-//             NextInput::Value(probe_batch) => process_probe_batch(
-//                 join_map,
-//                 build_side_records,
-//                 &probe_batch,
-//                 &self.probe_expressions,
-//                 &self.output_schema,
-//                 &self.output,
-//             ),
-//             NextInput::Finished => Err(DriverError::Finished)
-//         }
-//     }
-// }

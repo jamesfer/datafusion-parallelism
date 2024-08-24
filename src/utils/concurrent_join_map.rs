@@ -1,10 +1,11 @@
 use std::hash::{BuildHasher, Hash};
 use std::mem;
 use std::ops::DerefMut;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use dashmap::{DashMap, Entry, Map, OccupiedEntry, SharedValue, VacantEntry};
 use dashmap;
 use boxcar;
+use crate::utils::index_lookup::IndexLookup;
 
 #[derive(Debug)]
 struct ConcurrentJoinOverflowBuffer {
@@ -186,11 +187,6 @@ where T: Eq + Hash + Clone {
         }
     }
 
-    pub fn get_iter<'a>(&'a self, key: &'a T) -> impl Iterator<Item=usize> + 'a {
-        let starting_index = self.map.get(key).map(|index| *index).unwrap_or(0usize);
-        ReadOnlyJoinMapIterator::new(starting_index, &self.overflow)
-    }
-
     pub fn contains(&self, key: &T) -> bool {
         self.map.contains_key(key)
     }
@@ -209,6 +205,28 @@ where T: Eq + Hash + Clone {
 
     pub fn entry_count(&self) -> usize {
         self.map.len() + self.overflow.len()
+    }
+}
+
+impl <T> IndexLookup<T> for ReadOnlyJoinMap<T>
+    where T: Eq + Hash + Clone {
+    type It<'a> = ReadOnlyJoinMapIterator<'a>
+        where T: 'a;
+
+    fn get_iter<'a>(&'a self, key: &'a T) -> Self::It<'a> {
+        let starting_index = self.map.get(key).map(|index| *index).unwrap_or(0usize);
+        ReadOnlyJoinMapIterator::new(starting_index, &self.overflow)
+    }
+}
+
+impl <T> IndexLookup<T> for Arc<ReadOnlyJoinMap<T>>
+    where T: Eq + Hash + Clone {
+    type It<'a> = ReadOnlyJoinMapIterator<'a>
+        where T: 'a;
+
+    fn get_iter<'a>(&'a self, key: &'a T) -> Self::It<'a> {
+        let starting_index = self.map.get(key).map(|index| *index).unwrap_or(0usize);
+        ReadOnlyJoinMapIterator::new(starting_index, &self.overflow)
     }
 }
 

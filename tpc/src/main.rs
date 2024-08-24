@@ -19,6 +19,7 @@ use datafusion::physical_optimizer::optimizer::PhysicalOptimizer;
 use structopt::clap::arg_enum;
 use structopt::StructOpt;
 use tokio::time::Instant;
+use datafusion_parallelism::operator::use_parallel_hash_join_rule::UseParallelHashJoinRule;
 
 arg_enum! {
     #[derive(Debug)]
@@ -26,6 +27,16 @@ arg_enum! {
         Version1,
         Version2,
         Version3
+    }
+}
+
+impl Into<datafusion_parallelism::parse_sql::JoinReplacement> for JoinReplacement {
+    fn into(self) -> datafusion_parallelism::parse_sql::JoinReplacement {
+        match self {
+            JoinReplacement::Version1 => datafusion_parallelism::parse_sql::JoinReplacement::Original,
+            JoinReplacement::Version2 => datafusion_parallelism::parse_sql::JoinReplacement::New,
+            JoinReplacement::Version3 => datafusion_parallelism::parse_sql::JoinReplacement::New3,
+        }
     }
 }
 
@@ -146,18 +157,10 @@ pub async fn main() -> Result<()> {
     // Add new physical optimizer rule if needed
     // This code was added to the original script
     let mut optimizer_rules = PhysicalOptimizer::default().rules;
-    let use_new_join_rule = opt.new_join_replacement;
-    use_new_join_rule.map(|replacement| match replacement {
-        JoinReplacement::Version1 => {
-            optimizer_rules.insert(0, Arc::new(datafusion_parallelism::version1::UseParallelJoinRule));
-        }
-        JoinReplacement::Version2 => {
-            optimizer_rules.insert(0, Arc::new(datafusion_parallelism::version2::UseParallelJoinRule));
-        }
-        JoinReplacement::Version3 => {
-            optimizer_rules.insert(0, Arc::new(datafusion_parallelism::version3::UseParallelJoinRule));
-        }
-    });
+    if let Some(use_new_join_rule) = opt.new_join_replacement {
+        optimizer_rules.insert(0, Arc::new(UseParallelHashJoinRule::new(use_new_join_rule.into())));
+    }
+
 
     let runtime = Arc::new(RuntimeEnv::default());
     let state = SessionState::new_with_config_rt(config, runtime)

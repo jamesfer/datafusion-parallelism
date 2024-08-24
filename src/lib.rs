@@ -1,10 +1,11 @@
-mod sql_planner;
 pub mod parse_sql;
 mod utils;
 pub mod version1;
 pub mod version2;
 pub mod version3;
 pub mod api_utils;
+mod shared;
+pub mod operator;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
@@ -22,7 +23,7 @@ mod tests {
     use datafusion::execution::{SendableRecordBatchStream, TaskContext};
     use datafusion::execution::context::SessionState;
     use datafusion_common::DataFusionError;
-    use datafusion_physical_plan::{collect, DefaultDisplay, displayable};
+    use datafusion_physical_plan::{collect, displayable};
     use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
     use datafusion_physical_plan::streaming::PartitionStream;
     use crate::parse_sql::{JoinReplacement, make_session_state, parse_sql};

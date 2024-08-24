@@ -26,6 +26,8 @@ ahash = "0.8.11"
 flume = "0.11.0"
 cpuprofiler = "0.0.4"
 rand = "0.8.5"
+pin-project-lite = "0.2.14"
+async-trait = "0.1.81"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }

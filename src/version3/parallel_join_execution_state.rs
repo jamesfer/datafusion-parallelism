@@ -7,12 +7,12 @@ use datafusion_common::DataFusionError;
 
 use crate::utils::limited_rc::LimitedRc;
 use crate::utils::partitioned_concurrent_join_map::{create_writable_join_map, WritablePartitionedConcurrentJoinMap};
-use crate::utils::perform_once::PerformOnce;
+use crate::utils::async_initialize_once::AsyncInitializeOnce;
 
 pub struct ParallelJoinExecutionStateInstance {
     pub join_map: WritablePartitionedConcurrentJoinMap,
     pub batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
-    pub compute_compacted_batch_list: Arc<PerformOnce<Result<RecordBatch, DataFusionError>>>,
+    pub compute_compacted_batch_list: Arc<AsyncInitializeOnce<Result<RecordBatch, DataFusionError>>>,
 }
 
 impl Debug for ParallelJoinExecutionStateInstance {
@@ -27,7 +27,7 @@ pub struct ParallelJoinExecutionState {
 
 impl ParallelJoinExecutionState {
     pub fn new(parallelism: usize) -> Self {
-        let compute_compacted_batch_list = Arc::new(PerformOnce::new());
+        let compute_compacted_batch_list = Arc::new(AsyncInitializeOnce::new());
         let states = create_writable_join_map(parallelism)
             .into_iter()
             .zip(LimitedRc::new_copies(boxcar::Vec::new(), parallelism).into_iter())

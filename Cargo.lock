@@ -1094,6 +1094,7 @@ name = "datafusion-parallelism"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "async-trait",
  "boxcar",
  "cpuprofiler",
  "criterion",
@@ -1106,6 +1107,7 @@ dependencies = [
  "flume",
  "futures",
  "futures-core",
+ "pin-project-lite",
  "pprof",
  "rand",
  "tokio",
