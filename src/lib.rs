@@ -1,8 +1,5 @@
 pub mod parse_sql;
 mod utils;
-pub mod version1;
-pub mod version2;
-pub mod version3;
 pub mod api_utils;
 mod shared;
 pub mod operator;

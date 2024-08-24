@@ -7,9 +7,9 @@ use datafusion_physical_plan::SendableRecordBatchStream;
 use crate::parse_sql::JoinReplacement;
 
 use crate::utils::index_lookup::IndexLookup;
-use crate::version1::inner_hash_join::Version1;
-use crate::version2::inner_hash_join::Version2;
-use crate::version3::inner_hash_join::Version3;
+use crate::operator::version1::inner_hash_join::Version1;
+use crate::operator::version2::inner_hash_join::Version2;
+use crate::operator::version3::inner_hash_join::Version3;
 
 pub trait IndexLookupConsumer {
     type R;

@@ -10,14 +10,14 @@ use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_plan::SendableRecordBatchStream;
 use futures::{StreamExt, TryStreamExt};
 use futures_core::stream::Stream;
-use crate::operator::build_implementation::IndexLookupConsumer;
 
+use crate::operator::build_implementation::IndexLookupConsumer;
+use crate::operator::version3::parallel_join_execution_state::ParallelJoinExecutionState;
 use crate::shared::shared::{calculate_hash, evaluate_expressions};
 use crate::shared::streaming_probe_lookup::streaming_probe_lookup;
+use crate::utils::async_initialize_once::AsyncInitializeOnce;
 use crate::utils::limited_rc::LimitedRc;
 use crate::utils::partitioned_concurrent_join_map::{ReadonlyPartitionedConcurrentJoinMap, WritablePartitionedConcurrentJoinMap};
-use crate::utils::async_initialize_once::AsyncInitializeOnce;
-use crate::version3::parallel_join_execution_state::ParallelJoinExecutionState;
 
 #[derive(Debug)]
 pub struct Version3 {

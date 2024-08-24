@@ -3,11 +3,10 @@ use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, OnceLock};
 
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
-use datafusion_common::{DataFusionError, JoinType};
+use datafusion_common::JoinType;
 use datafusion_physical_expr::{Distribution, EquivalenceProperties, Partitioning, PhysicalExprRef};
 use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties};
 use datafusion_physical_plan::joins::{HashJoinExec, PartitionMode};
-use datafusion_physical_plan::joins::utils::build_join_schema;
 
 use crate::operator::parallel_hash_join_stream::ParallelHashJoinStream;
 use crate::parse_sql::JoinReplacement;

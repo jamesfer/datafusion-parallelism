@@ -16,7 +16,7 @@ use crate::shared::streaming_probe_lookup::streaming_probe_lookup;
 
 use crate::utils::limited_rc::LimitedRc;
 use crate::utils::partitioned_concurrent_join_map::{ReadonlyPartitionedConcurrentJoinMap, WritablePartitionedConcurrentJoinMap};
-use crate::version2::parallel_join_execution_state::ParallelJoinExecutionState;
+use crate::operator::version2::parallel_join_execution_state::ParallelJoinExecutionState;
 
 #[derive(Debug)]
 pub struct Version2 {

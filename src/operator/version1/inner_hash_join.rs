@@ -17,7 +17,7 @@ use crate::shared::shared::{calculate_hash, evaluate_expressions};
 use crate::shared::streaming_probe_lookup::streaming_probe_lookup;
 use crate::utils::concurrent_join_map::{ConcurrentJoinMap, ReadOnlyJoinMap};
 use crate::utils::limited_rc::LimitedRc;
-use crate::version1::parallel_join_execution_state::ParallelJoinExecutionState;
+use crate::operator::version1::parallel_join_execution_state::ParallelJoinExecutionState;
 
 #[derive(Debug)]
 pub struct Version1 {
