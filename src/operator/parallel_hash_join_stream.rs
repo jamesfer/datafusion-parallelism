@@ -7,8 +7,9 @@ use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion_common::{DataFusionError, JoinType};
 use datafusion_physical_expr::PhysicalExprRef;
+use crate::operator::build_implementation::BuildImplementation;
+use crate::operator::lookup_consumers::IndexLookupConsumer;
 
-use crate::operator::build_implementation::{BuildImplementation, IndexLookupConsumer};
 use crate::operator::probe_lookup_implementation::probe_lookup_implementation::ProbeLookupStreamImplementation;
 use crate::parse_sql::JoinReplacement;
 use crate::utils::future_to_record_batch_stream::future_to_record_batch_stream;
@@ -89,12 +90,13 @@ impl ParallelHashJoinStream {
                     probe_expressions,
                     probe_lookup_implementation,
                 );
-                Ok(build_implementation.build_right_side(
+                let stream = build_implementation.build_right_side(
                     partition,
                     right,
                     &build_expressions,
-                    probe_lookup,
-                ).await??)
+                    probe_lookup
+                ).await??;
+                Ok(stream)
             }
         )
     }

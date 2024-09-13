@@ -11,17 +11,18 @@ use datafusion_physical_plan::SendableRecordBatchStream;
 use futures::{StreamExt, TryStreamExt};
 use crate::operator::lookup_consumers::{IndexLookupProvider, SimpleIndexLookupProvider};
 
-use crate::operator::version3::parallel_join_execution_state::ParallelJoinExecutionState;
+use crate::operator::version4::hash_lookup_builder::LocalAccumulator;
+use crate::operator::version4::parallel_join_execution_state::ParallelJoinExecutionState;
 use crate::shared::shared::{calculate_hash, evaluate_expressions};
 use crate::utils::async_initialize_once::AsyncInitializeOnce;
 use crate::utils::partitioned_concurrent_join_map::{ReadonlyPartitionedConcurrentJoinMap, WritablePartitionedConcurrentJoinMap};
 
 #[derive(Debug)]
-pub struct Version3 {
+pub struct Version4 {
     state: ParallelJoinExecutionState,
 }
 
-impl Version3 {
+impl Version4 {
     pub fn new(parallelism: usize) -> Self {
         Self {
             state: ParallelJoinExecutionState::new(parallelism),
@@ -34,18 +35,15 @@ impl Version3 {
         stream: SendableRecordBatchStream,
         build_expressions: &Vec<PhysicalExprRef>,
     ) -> Result<impl IndexLookupProvider, DataFusionError> {
-        let state = self.state.take(partition)
+        let mut state = self.state.take(partition)
             .ok_or(DataFusionError::Internal(format!("State already consumed for partition {}", partition)))?;
 
         let right_schema = stream.schema().clone();
-        consume_build_side(stream, &state.join_map, &build_expressions, &state.batch_list).await?;
+        consume_build_side(stream, &mut state.accumulator, &build_expressions).await?;
 
-        let (build_side_records, read_only_join_map) = compact_join_map(
-            &right_schema,
-            state.join_map,
-            &state.batch_list,
-            state.compute_compacted_batch_list,
-        ).await?;
+        // Once we are finished with the accumulator, we can submit it to convert it to a compactor
+        let compactor = state.accumulator.submit();
+        let (build_side_records, read_only_join_map) = compactor.compact(right_schema).await?;
 
         Ok(SimpleIndexLookupProvider::new(read_only_join_map, build_side_records))
     }
@@ -53,34 +51,29 @@ impl Version3 {
 
 async fn consume_build_side(
     left: SendableRecordBatchStream,
-    join_map: &WritablePartitionedConcurrentJoinMap,
+    accumulator: &mut LocalAccumulator,
     build_expressions: &Vec<PhysicalExprRef>,
-    batch_list: &boxcar::Vec<(usize, RecordBatch)>,
 ) -> Result<(), DataFusionError> {
     // Exhaust build side
     left.try_for_each(|record_batch| {
         ready(process_input_batch(
             record_batch,
-            &join_map,
+            accumulator,
             &build_expressions,
-            batch_list,
         ))
     }).await
 }
 
 fn process_input_batch(
     input: RecordBatch,
-    join_map: &WritablePartitionedConcurrentJoinMap,
+    accumulator: &mut LocalAccumulator,
     expressions: &Vec<PhysicalExprRef>,
-    batch_list: &boxcar::Vec<(usize, RecordBatch)>,
 ) -> Result<(), DataFusionError> {
     let keys = evaluate_expressions(expressions, &input)?;
     let hashes = calculate_hash(&keys)?;
 
-    let buffer_index = join_map.insert_all(hashes);
+    accumulator.add_records(keys, hashes, input);
 
-    // Add the record batch to the list
-    batch_list.push((buffer_index, input));
     Ok(())
 }
 

@@ -1,11 +1,8 @@
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use criterion::async_executor::AsyncExecutor;
-use criterion::profiler::Profiler;
-use datafusion::arrow::array::{Int32Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::{CatalogProvider, MemoryCatalogProvider, MemorySchemaProvider, SchemaProvider};
@@ -18,66 +15,32 @@ use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion_physical_plan::streaming::PartitionStream;
 use futures_core::future::BoxFuture;
 use tokio::runtime::Runtime;
+
 use datafusion_parallelism::api_utils::{make_int_array, make_string_constant_array};
-
 use datafusion_parallelism::parse_sql::{JoinReplacement, make_session_state};
-
-// use cpuprofiler::PROFILER;
-
-struct MyProfiler {
-    // guard: Option<ProfilerGuard<'static>>
-}
-
-impl MyProfiler {
-    fn new() -> Self {
-        MyProfiler {
-            // guard: None,
-        }
-    }
-}
-
-impl Profiler for MyProfiler {
-    fn start_profiling(&mut self, benchmark_id: &str, benchmark_dir: &Path) {
-        // PROFILER.lock().unwrap().start(format!("./{benchmark_id}.profile")).unwrap();
-        // self.guard = Some(pprof::ProfilerGuardBuilder::default()
-        //     .frequency(1000)
-        //     .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-        //     .build()
-        //     .unwrap());
-    }
-
-    fn stop_profiling(&mut self, benchmark_id: &str, benchmark_dir: &Path) {
-        // PROFILER.lock().unwrap().stop().unwrap();
-        // if let Some(g) = &self.guard {
-        //     if let Ok(report) = g.report().build() {
-        //         println!("report: {:?}", &report);
-        //     };
-        // }
-        // self.guard = None
-    }
-}
 
 fn make_config() -> Criterion {
     Criterion::default()
-        .warm_up_time(Duration::from_secs(30))
+        .warm_up_time(Duration::from_secs(60))
         .measurement_time(Duration::from_secs(300))
-        // .with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))
-        .with_profiler(MyProfiler::new())
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     let tests: Vec<Box<dyn BenchmarkQuery>> = vec![
-        Box::new(AllEqualSize),
-        Box::new(MuchLargerProbeSize),
+        // Box::new(AllEqualSize),
+        // Box::new(MuchLargerProbeSize),
+        Box::new(TinyProbeSize),
     ];
 
     let sessions = vec![
         ("control", make_session_state(None)),
         ("version1", make_session_state(Some(JoinReplacement::Original))),
-        ("version2", make_session_state(Some(JoinReplacement::New))),
+        // ("version2", make_session_state(Some(JoinReplacement::New))),
         ("version3", make_session_state(Some(JoinReplacement::New3))),
+        ("version4", make_session_state(Some(JoinReplacement::New4))),
+        ("version5", make_session_state(Some(JoinReplacement::New5))),
     ];
 
     for test in tests {
@@ -246,6 +209,64 @@ impl BenchmarkQuery for MuchLargerProbeSize {
                 .map(|table_number| {
                     let data =
                         (0..100).into_iter()
+                            .map(|i| {
+                                RecordBatch::try_new(
+                                    small_table_schema(),
+                                    vec![
+                                        Arc::new(make_int_array(i * 1024, (i + 1) * 1024, table_number)),
+                                        Arc::new(make_string_constant_array("world".to_string(), 1024)),
+                                    ],
+                                ).unwrap()
+                            })
+                            .collect::<Vec<_>>();
+                    (format!("small_table_{table_number}"), small_table_schema(), data)
+                })
+                .collect::<Vec<_>>();
+
+            register_tables(
+                session_state,
+                vec![("base_table".to_string(), base_table_schema(), base_data)]
+                    .into_iter()
+                    .chain(join_tables.into_iter())
+                    .collect::<Vec<_>>(),
+            );
+
+            // Plan query
+            prepare_query(session_state, FOUR_TABLE_SQL).await
+        })
+    }
+}
+
+struct TinyProbeSize;
+
+impl BenchmarkQuery for TinyProbeSize {
+    fn name(&self) -> &str {
+        "TinyProbeSide"
+    }
+
+    fn run<'a>(&self, session_state: &'a SessionState) -> BoxFuture<'a, Box<dyn FnMut() -> BoxFuture<'a, ()> + 'a>> {
+        Box::pin(async move {
+            let base_data =
+                (0..10000).into_iter()
+                    .map(|i| {
+                        let i = i % 10;
+                        RecordBatch::try_new(
+                            base_table_schema(),
+                            vec![
+                                Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 1)),
+                                Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 2)),
+                                Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 3)),
+                                Arc::new(make_int_array(i * 1024, (i + 1) * 1024, 4)),
+                                Arc::new(make_string_constant_array("hello".to_string(), 1024)),
+                            ],
+                        ).unwrap()
+                    })
+                    .collect::<Vec<_>>();
+
+            let join_tables = (1..5)
+                .map(|table_number| {
+                    let data =
+                        (0..10).into_iter()
                             .map(|i| {
                                 RecordBatch::try_new(
                                     small_table_schema(),

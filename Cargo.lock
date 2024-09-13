@@ -1107,6 +1107,7 @@ dependencies = [
  "flume",
  "futures",
  "futures-core",
+ "hashbrown",
  "pin-project-lite",
  "pprof",
  "rand",

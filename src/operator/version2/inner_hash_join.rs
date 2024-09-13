@@ -1,22 +1,18 @@
 use std::future::ready;
-use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::RecordBatchStream;
-use datafusion_common::{DataFusionError, JoinType};
+use datafusion_common::DataFusionError;
 use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_plan::SendableRecordBatchStream;
 use futures::{StreamExt, TryStreamExt};
-use futures_core::stream::Stream;
-use crate::operator::build_implementation::IndexLookupConsumer;
-use crate::shared::shared::{calculate_hash, evaluate_expressions};
-use crate::shared::streaming_probe_lookup::streaming_probe_lookup;
+use crate::operator::lookup_consumers::{IndexLookupProvider, SimpleIndexLookupProvider};
 
-use crate::utils::limited_rc::LimitedRc;
-use crate::utils::partitioned_concurrent_join_map::{ReadonlyPartitionedConcurrentJoinMap, WritablePartitionedConcurrentJoinMap};
 use crate::operator::version2::parallel_join_execution_state::ParallelJoinExecutionState;
+use crate::shared::shared::{calculate_hash, evaluate_expressions};
+use crate::utils::partitioned_concurrent_join_map::{ReadonlyPartitionedConcurrentJoinMap, WritablePartitionedConcurrentJoinMap};
 
 #[derive(Debug)]
 pub struct Version2 {
@@ -30,14 +26,12 @@ impl Version2 {
         }
     }
 
-    pub async fn build_right_side<C>(
+    pub async fn build_right_side(
         &self,
         partition: usize,
         stream: SendableRecordBatchStream,
         build_expressions: &Vec<PhysicalExprRef>,
-        consume: C
-    ) -> Result<C::R, DataFusionError>
-        where C: IndexLookupConsumer + Send {
+    ) -> Result<impl IndexLookupProvider, DataFusionError> {
         let state = self.state.take(partition)
             .ok_or(DataFusionError::Internal(format!("State already consumed for partition {}", partition)))?;
 
@@ -50,31 +44,8 @@ impl Version2 {
             &state.batch_list,
         ).await?;
 
-        Ok(consume.call(read_only_join_map, build_side_records))
+        Ok(SimpleIndexLookupProvider::new(read_only_join_map, build_side_records))
     }
-}
-
-pub async fn inner_join_stream(
-    join_schema: SchemaRef,
-    left: SendableRecordBatchStream,
-    right: SendableRecordBatchStream,
-    on: Vec<(PhysicalExprRef, PhysicalExprRef)>,
-    join_map: WritablePartitionedConcurrentJoinMap,
-    batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
-) -> Result<impl Stream<Item=Result<RecordBatch, DataFusionError>>, DataFusionError> {
-    let (probe_expressions, build_expressions): (Vec<PhysicalExprRef>, Vec<PhysicalExprRef>) = on.into_iter().unzip();
-
-    let right_schema = right.schema().clone();
-    consume_build_side(right, &join_map, &build_expressions, &batch_list).await?;
-
-    let (build_side_records, read_only_join_map) = compact_join_map(
-        &right_schema,
-        join_map,
-        &batch_list
-    ).await?;
-
-    // Stream left side
-    Ok(streaming_probe_lookup(JoinType::Inner, join_schema, left, probe_expressions, build_side_records, read_only_join_map))
 }
 
 async fn consume_build_side(

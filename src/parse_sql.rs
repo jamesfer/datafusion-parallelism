@@ -13,7 +13,11 @@ use crate::operator::use_parallel_hash_join_rule::UseParallelHashJoinRule;
 pub enum JoinReplacement {
     Original,
     New,
-    New3
+    New3,
+    New4,
+    New5,
+    New6,
+    New7,
 }
 
 pub fn make_session_state(use_new_join_rule: Option<JoinReplacement>) -> SessionState {

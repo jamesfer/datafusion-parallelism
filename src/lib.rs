@@ -1,5 +1,5 @@
 pub mod parse_sql;
-mod utils;
+pub mod utils;
 pub mod api_utils;
 mod shared;
 pub mod operator;
@@ -232,7 +232,143 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn with_new_rule3() {
         // Create session state
-        let session_state = make_session_state(Some(JoinReplacement::New3));
+        let session_state = make_session_state(Some(JoinReplacement::New4));
+
+        register_tables(&session_state);
+
+        let plan = parse_sql(
+            "SELECT * \
+            FROM my_catalog.my_schema.base_table \
+            JOIN my_catalog.my_schema.small_table_1 \
+              ON base_table.id1 = small_table_1.id \
+            JOIN my_catalog.my_schema.small_table_2 \
+              ON base_table.id2 = small_table_2.id \
+            JOIN my_catalog.my_schema.small_table_3 \
+              ON base_table.id3 = small_table_3.id \
+            JOIN my_catalog.my_schema.small_table_4 \
+              ON base_table.id4 = small_table_4.id",
+            &session_state,
+        ).await
+            .unwrap();
+
+        let mut display_plan = displayable(plan.as_ref());
+        println!("{}", display_plan.set_show_schema(true).indent(true));
+
+        let results = collect(plan, Arc::new(TaskContext::default())).await.unwrap();
+        let single_result = concat_batches(&results[0].schema(), results.iter()).unwrap();
+        let indices = sort_to_indices(single_result.column(0), None, None).unwrap();
+        let columns = single_result.columns().iter().map(|c| take(&*c, &indices, None).unwrap()).collect();
+        let sorted = RecordBatch::try_new(single_result.schema(), columns).unwrap();
+
+        assert_eq!(sorted, {
+            let output_schema = Arc::new(Schema::new(vec![
+                Field::new("id1", DataType::Int32, false),
+                Field::new("id2", DataType::Int32, false),
+                Field::new("id3", DataType::Int32, false),
+                Field::new("id4", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+            ]));
+            RecordBatch::try_new(
+                output_schema.clone(),
+                vec![
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("hello".to_string(), 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("world".to_string(), 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("world".to_string(), 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("world".to_string(), 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("world".to_string(), 1024)),
+                ],
+            ).unwrap()
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn with_new_rule4() {
+        // Create session state
+        let session_state = make_session_state(Some(JoinReplacement::New4));
+
+        register_tables(&session_state);
+
+        let plan = parse_sql(
+            "SELECT * \
+            FROM my_catalog.my_schema.base_table \
+            JOIN my_catalog.my_schema.small_table_1 \
+              ON base_table.id1 = small_table_1.id \
+            JOIN my_catalog.my_schema.small_table_2 \
+              ON base_table.id2 = small_table_2.id \
+            JOIN my_catalog.my_schema.small_table_3 \
+              ON base_table.id3 = small_table_3.id \
+            JOIN my_catalog.my_schema.small_table_4 \
+              ON base_table.id4 = small_table_4.id",
+            &session_state,
+        ).await
+            .unwrap();
+
+        let mut display_plan = displayable(plan.as_ref());
+        println!("{}", display_plan.set_show_schema(true).indent(true));
+
+        let results = collect(plan, Arc::new(TaskContext::default())).await.unwrap();
+        let single_result = concat_batches(&results[0].schema(), results.iter()).unwrap();
+        let indices = sort_to_indices(single_result.column(0), None, None).unwrap();
+        let columns = single_result.columns().iter().map(|c| take(&*c, &indices, None).unwrap()).collect();
+        let sorted = RecordBatch::try_new(single_result.schema(), columns).unwrap();
+
+        assert_eq!(sorted, {
+            let output_schema = Arc::new(Schema::new(vec![
+                Field::new("id1", DataType::Int32, false),
+                Field::new("id2", DataType::Int32, false),
+                Field::new("id3", DataType::Int32, false),
+                Field::new("id4", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Utf8, false),
+            ]));
+            RecordBatch::try_new(
+                output_schema.clone(),
+                vec![
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("hello".to_string(), 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("world".to_string(), 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("world".to_string(), 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("world".to_string(), 1024)),
+                    Arc::new(make_int_array(0, 1024)),
+                    Arc::new(make_string_array("world".to_string(), 1024)),
+                ],
+            ).unwrap()
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn with_new_rule5() {
+        // Create session state
+        let session_state = make_session_state(Some(JoinReplacement::New5));
 
         register_tables(&session_state);
 

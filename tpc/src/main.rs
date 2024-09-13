@@ -26,7 +26,11 @@ arg_enum! {
     pub enum JoinReplacement {
         Version1,
         Version2,
-        Version3
+        Version3,
+        Version4,
+        Version5,
+        Version6,
+        Version7,
     }
 }
 
@@ -36,6 +40,10 @@ impl Into<datafusion_parallelism::parse_sql::JoinReplacement> for JoinReplacemen
             JoinReplacement::Version1 => datafusion_parallelism::parse_sql::JoinReplacement::Original,
             JoinReplacement::Version2 => datafusion_parallelism::parse_sql::JoinReplacement::New,
             JoinReplacement::Version3 => datafusion_parallelism::parse_sql::JoinReplacement::New3,
+            JoinReplacement::Version4 => datafusion_parallelism::parse_sql::JoinReplacement::New4,
+            JoinReplacement::Version5 => datafusion_parallelism::parse_sql::JoinReplacement::New5,
+            JoinReplacement::Version6 => datafusion_parallelism::parse_sql::JoinReplacement::New6,
+            JoinReplacement::Version7 => datafusion_parallelism::parse_sql::JoinReplacement::New7,
         }
     }
 }

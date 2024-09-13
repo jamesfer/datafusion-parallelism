@@ -166,7 +166,7 @@ where K: Eq + Hash + Clone {
 
 impl <T> ReadOnlyJoinMap<T>
 where T: Eq + Hash + Clone {
-    fn new(map: dashmap::ReadOnlyView<T, usize>, overflow: Vec<usize>) -> ReadOnlyJoinMap<T> {
+    pub fn new(map: dashmap::ReadOnlyView<T, usize>, overflow: Vec<usize>) -> ReadOnlyJoinMap<T> {
         ReadOnlyJoinMap { map, overflow }
     }
 
