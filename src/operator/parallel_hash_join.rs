@@ -9,6 +9,7 @@ use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, Exec
 use datafusion_physical_plan::joins::{HashJoinExec, PartitionMode};
 
 use crate::operator::parallel_hash_join_stream::ParallelHashJoinStream;
+use crate::operator::probe_lookup_implementation::probe_lookup_implementation::ProbeLookupStreamImplementation;
 use crate::parse_sql::JoinReplacement;
 
 #[derive(Debug)]
@@ -32,7 +33,15 @@ impl ParallelHashJoin {
     }
 
     pub fn convert_hash_join(value: &HashJoinExec, replacement: JoinReplacement) -> Result<Self, String> {
-        if value.join_type != JoinType::Inner {
+        let accepted_join_types = vec![
+            JoinType::Inner,
+            JoinType::Full,
+            JoinType::Left,
+            JoinType::LeftSemi,
+            JoinType::LeftAnti,
+        ];
+
+        if !accepted_join_types.contains(&value.join_type) {
             return Err(format!("Unsupported join type {}", value.join_type));
         }
         if value.projection.is_some() {

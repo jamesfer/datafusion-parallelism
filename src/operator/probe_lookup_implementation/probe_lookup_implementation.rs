@@ -7,6 +7,9 @@ use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_plan::joins::utils::build_join_schema;
 use crate::operator::probe_lookup_implementation::full::FullJoinProbeLookupStream;
 use crate::operator::probe_lookup_implementation::inner::InnerJoinProbeLookupStream;
+use crate::operator::probe_lookup_implementation::left_anti::LeftAntiProbeLookupStream;
+use crate::operator::probe_lookup_implementation::left_outer::LeftOuterProbeLookupStream;
+use crate::operator::probe_lookup_implementation::left_semi::LeftSemiProbeLookupStream;
 use crate::utils::index_lookup::IndexLookup;
 use crate::utils::plain_record_batch_stream::SendablePlainRecordBatchStream;
 
@@ -14,6 +17,9 @@ use crate::utils::plain_record_batch_stream::SendablePlainRecordBatchStream;
 pub enum ProbeLookupStreamImplementation {
     InnerJoin(InnerJoinProbeLookupStream),
     FullJoin(FullJoinProbeLookupStream),
+    LeftAnti(LeftAntiProbeLookupStream),
+    LeftOuter(LeftOuterProbeLookupStream),
+    LeftSemi(LeftSemiProbeLookupStream),
 }
 
 impl ProbeLookupStreamImplementation {
@@ -25,14 +31,20 @@ impl ProbeLookupStreamImplementation {
             JoinType::Full => ProbeLookupStreamImplementation::FullJoin(
                 FullJoinProbeLookupStream::new(parallelism),
             ),
+            JoinType::Left => ProbeLookupStreamImplementation::LeftOuter(
+                LeftOuterProbeLookupStream::new(parallelism),
+            ),
+            JoinType::LeftSemi => ProbeLookupStreamImplementation::LeftSemi(
+                LeftSemiProbeLookupStream::new(parallelism),
+            ),
+            JoinType::LeftAnti => ProbeLookupStreamImplementation::LeftAnti(
+                LeftAntiProbeLookupStream::new(parallelism),
+            ),
 
             // TODO
-            // JoinType::Left => {}
             // JoinType::Right => {}
             // JoinType::Full => {}
-            // JoinType::LeftSemi => {}
             // JoinType::RightSemi => {}
-            // JoinType::LeftAnti => {}
             // JoinType::RightAnti => {}
             _ => panic!(),
         }
@@ -46,6 +58,9 @@ impl ProbeLookupStreamImplementation {
         let join_type = match self {
             ProbeLookupStreamImplementation::InnerJoin(_) => JoinType::Inner,
             ProbeLookupStreamImplementation::FullJoin(_) => JoinType::Full,
+            ProbeLookupStreamImplementation::LeftAnti(_) => JoinType::LeftAnti,
+            ProbeLookupStreamImplementation::LeftOuter(_) => JoinType::Left,
+            ProbeLookupStreamImplementation::LeftSemi(_) => JoinType::LeftSemi,
         };
         let (schema, _) = build_join_schema(&left, &right, &join_type);
         Arc::new(schema)
@@ -61,14 +76,35 @@ impl ProbeLookupStreamImplementation {
     ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
         where Lookup: IndexLookup<u64> + Sync + Send + 'static {
         match self {
-            ProbeLookupStreamImplementation::InnerJoin(inner) => inner.streaming_probe_lookup(
+            ProbeLookupStreamImplementation::InnerJoin(implementation) => implementation.streaming_probe_lookup(
                 output_schema,
                 probe_stream,
                 probe_expressions,
                 build_side_records,
                 read_only_join_map,
             ),
-            ProbeLookupStreamImplementation::FullJoin(full) => full.streaming_probe_lookup(
+            ProbeLookupStreamImplementation::FullJoin(implementation) => implementation.streaming_probe_lookup(
+                output_schema,
+                probe_stream,
+                probe_expressions,
+                build_side_records,
+                read_only_join_map,
+            ),
+            ProbeLookupStreamImplementation::LeftAnti(implementation) => implementation.streaming_probe_lookup(
+                output_schema,
+                probe_stream,
+                probe_expressions,
+                build_side_records,
+                read_only_join_map,
+            ),
+            ProbeLookupStreamImplementation::LeftOuter(implementation) => implementation.streaming_probe_lookup(
+                output_schema,
+                probe_stream,
+                probe_expressions,
+                build_side_records,
+                read_only_join_map,
+            ),
+            ProbeLookupStreamImplementation::LeftSemi(implementation) => implementation.streaming_probe_lookup(
                 output_schema,
                 probe_stream,
                 probe_expressions,

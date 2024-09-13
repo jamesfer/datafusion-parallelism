@@ -6,16 +6,17 @@ use datafusion::execution::SendableRecordBatchStream;
 use datafusion_common::DataFusionError;
 use datafusion_physical_expr::PhysicalExprRef;
 use futures::stream::StreamExt;
-use crate::shared::shared::{calculate_hash, evaluate_expressions, get_matching_indices};
+
+use crate::shared::shared::{calculate_hash, evaluate_expressions, get_matching_indices_with_probe};
 use crate::utils::index_lookup::IndexLookup;
 use crate::utils::plain_record_batch_stream::{PlainRecordBatchStream, SendablePlainRecordBatchStream};
 
 #[derive(Debug)]
-pub struct InnerJoinProbeLookupStream {
+pub struct LeftOuterProbeLookupStream {
     parallelism: usize,
 }
 
-impl InnerJoinProbeLookupStream {
+impl LeftOuterProbeLookupStream {
     pub fn new(parallelism: usize) -> Self {
         Self { parallelism }
     }
@@ -29,7 +30,7 @@ impl InnerJoinProbeLookupStream {
         read_only_join_map: Lookup
     ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
         where Lookup: IndexLookup<u64> + Send + Sync + 'static {
-        Ok(Box::pin(inner_join_streaming_lookup(
+        Ok(Box::pin(left_outer_join_streaming_lookup(
             join_schema,
             probe_stream,
             probe_expressions,
@@ -39,7 +40,7 @@ impl InnerJoinProbeLookupStream {
     }
 }
 
-pub fn inner_join_streaming_lookup<Lookup>(
+pub fn left_outer_join_streaming_lookup<Lookup>(
     output_schema: SchemaRef,
     probe_stream: SendableRecordBatchStream,
     probe_expressions: Vec<PhysicalExprRef>,
@@ -57,7 +58,9 @@ pub fn inner_join_streaming_lookup<Lookup>(
             let probe_hashes = calculate_hash(&probe_keys)?;
 
             // Find matching rows from build side
-            let (probe_indices, build_indices) = get_matching_indices(&probe_hashes, &read_only_join_map);
+            let (probe_indices, build_indices) = get_matching_indices_with_probe(&probe_hashes, &read_only_join_map);
+
+            // TODO check for hash collisions
 
             let output_columns = probe_batch.columns().iter()
                 .map(|array| arrow::compute::take(array, &probe_indices, None))
