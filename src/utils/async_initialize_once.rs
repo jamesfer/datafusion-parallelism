@@ -63,4 +63,8 @@ impl <T> AsyncInitializeOnce<T> {
         self.value.get()
             .expect("Complete notification was triggered without setting the value")
     }
+
+    pub fn into_inner(self) -> Option<T> {
+        self.value.into_inner()
+    }
 }

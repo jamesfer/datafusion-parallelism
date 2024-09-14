@@ -193,7 +193,7 @@ struct SharedCompactorConstructor {
     // state: LimitedRc<HashMapState>,
     perform_by_last_owner: Arc<PerformByLastOwner<Arc<ReadOnlyJoinMap>>>,
 
-    global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+    // global_buffer_initializer: Arc<AsyncInitializeOnce<Vec<AtomicCell<Option<LimitedRc<GlobalBuffer>>>>>>,
 }
 
 impl SharedCompactorConstructor {
@@ -205,7 +205,7 @@ impl SharedCompactorConstructor {
         eventually_consume_batch_list: Arc<EventuallyConsume<boxcar::Vec<(usize, RecordBatch)>>>,
         compact_batch_list_once: Arc<AsyncInitializeOnce<Result<RecordBatch, DataFusionError>>>,
         perform_by_last_owner: Arc<PerformByLastOwner<Arc<ReadOnlyJoinMap>>>,
-        global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+        // global_buffer_initializer: Arc<AsyncInitializeOnce<Vec<AtomicCell<Option<LimitedRc<GlobalBuffer>>>>>>,
     ) -> Self {
         Self {
             instance_number,
@@ -215,7 +215,7 @@ impl SharedCompactorConstructor {
             eventually_consume_batch_list,
             compact_batch_list_once,
             perform_by_last_owner,
-            global_buffer_initializer,
+            // global_buffer_initializer,
         }
     }
 
@@ -234,13 +234,14 @@ impl SharedCompactorConstructor {
             state,
             self.perform_by_last_owner,
             offset_tracker,
-            self.global_buffer_initializer,
+            // self.global_buffer_initializer,
         )
     }
 }
 
 struct HashMapState {
     hash_lookup: DashMap<u64, usize>,
+    global_buffer: AsyncInitializeOnce<GlobalBuffer>,
 }
 
 pub struct SharedCompactor {
@@ -261,7 +262,7 @@ pub struct SharedCompactor {
     build_join_map_when_last: Arc<PerformByLastOwner<Arc<ReadOnlyJoinMap>>>,
 
     offset_tracker: Arc<OffsetTracker>,
-    global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+    // global_buffer_initializer: Arc<AsyncInitializeOnce<Vec<AtomicCell<Option<LimitedRc<GlobalBuffer>>>>>>,
 }
 
 impl SharedCompactor {
@@ -276,7 +277,7 @@ impl SharedCompactor {
         state: LimitedRc<HashMapState>,
         build_join_map_when_last: Arc<PerformByLastOwner<Arc<ReadOnlyJoinMap>>>,
         offset_tracker: Arc<OffsetTracker>,
-        global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+        // global_buffer_initializer: Arc<AsyncInitializeOnce<Vec<AtomicCell<Option<LimitedRc<GlobalBuffer>>>>>>,
     ) -> Self {
         Self {
             instance_number,
@@ -289,7 +290,7 @@ impl SharedCompactor {
             state,
             build_join_map_when_last,
             offset_tracker,
-            global_buffer_initializer,
+            // global_buffer_initializer,
         }
     }
 
@@ -301,7 +302,7 @@ impl SharedCompactor {
             self.instance_number,
             self.shards_to_compact_sender,
             &self.offset_tracker,
-            &self.global_buffer_initializer,
+            &self.state,
         ).await?;
 
         // The first thread that reaches here takes ownership of compacting the batches, but it
@@ -325,18 +326,17 @@ impl SharedCompactor {
         };
 
         // Waits for all local data to be written to the global store, then streams shards to compact via a shared channel
-        //   Compaction of a shard involves allocating an overflow buffer, locking the matching shard in a dashmap, and writing all the results at once,
-        let global_buffer = self.global_buffer_initializer.get().await.clone();
-        while let Ok((shard_number, all_shard_contents)) = self.shards_to_compact_receiver.recv_async().await {
-            Self::compact_shard(shard_number, all_shard_contents, &self.state.hash_lookup, &global_buffer);
-            // self.state.overflow_buffers[shard_number].store(shard_buffer);
+        {
+            let global_buffer = self.state.global_buffer.get().await;
+            while let Ok((shard_number, all_shard_contents)) = self.shards_to_compact_receiver.recv_async().await {
+                Self::compact_shard(shard_number, all_shard_contents, &self.state.hash_lookup, global_buffer);
+            }
         }
 
         // Once the last thread has written all the data to the state, we can finally build a
         // concise read only lookup map
         let join_map_result = self.build_join_map_when_last.run(self.state, |state| {
-            // Arc::new(ReadOnlyJoinMap::new(state.hash_lookup, global_buffer.to_vec()))
-            Arc::new(ReadOnlyJoinMap::new(state.hash_lookup.into_read_only(), global_buffer.to_vec()))
+            Arc::new(ReadOnlyJoinMap::new(state.hash_lookup.into_read_only(), state.global_buffer.to_vec()))
         });
 
         // Wait for the record batch and join map futures. It doesn't matter which order we do it in
@@ -364,7 +364,7 @@ impl SharedCompactor {
         instance_number: usize,
         shards_to_compact_sender: flume::Sender<(usize, Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>)>,
         offset_tracker: &OffsetTracker,
-        global_buffer_initializer: &AsyncInitializeOnce<Arc<GlobalBuffer>>,
+        state: &HashMapState,
     ) -> Result<(), DataFusionError> {
         let combined_shard_contents = local_shard_contents.into_iter()
             .zip(shared_shard_contents.iter());
@@ -383,7 +383,7 @@ impl SharedCompactor {
         if let Some(owned_shard_contents) = LimitedRc::into_inner(shared_shard_contents) {
             // Build the global buffer
             let global_buffer = Arc::new(GlobalBuffer::new(offset_tracker.get().offset + 1));
-            global_buffer_initializer.run_first(|| async { global_buffer })
+            state.global_buffer.run_first(|| async { global_buffer })
                 .expect("Another thread tried to build the global buffer")
                 .await;
 
@@ -451,7 +451,11 @@ impl SharedCompactor {
                 |k| output_hash_lookup.hasher().hash_one(k),
             ) {
                 // If there was an existing index, we need to store it in the overflow buffer
-                global_buffer.set(global_index, existing);
+                // Safety: each global index is unique, so we are guaranteed to be the only writer
+                // to this particular memory address.
+                unsafe {
+                    global_buffer.set(global_index, existing);
+                }
             }
         }
     }
@@ -490,28 +494,24 @@ impl SharedCompactor {
 }
 
 struct GlobalBuffer {
-    vec: Vec<AtomicUsize>
+    vec: UnsafeCell<Vec<usize>>
 }
 
 impl GlobalBuffer {
     pub fn new(size: usize) -> Self {
         Self {
-            vec: (0..size).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>(),
+            vec: UnsafeCell::new(vec![0usize; size]),
         }
     }
 
-    pub fn set(&self, index: usize, value: usize) {
-        self.vec[index].store(value, Ordering::Relaxed);
+    pub unsafe fn set(&self, index: usize, value: usize) {
+        let x = self.vec.get();
+        x[index] = value;
+        // self.vec[index].store(value, Ordering::Relaxed);
     }
 
-    pub fn get(&self, index: usize) -> usize {
-        self.vec[index].load(Ordering::Relaxed)
-    }
-
-    pub fn to_vec(&self) -> Vec<usize> {
-        self.vec.iter()
-            .map(|atomic| atomic.load(Ordering::Relaxed))
-            .collect()
+    pub fn to_vec(self) -> Vec<usize> {
+        self.vec.into_inner()
     }
 }
 
@@ -700,6 +700,7 @@ pub fn create_local_accumulators(count: usize) -> Vec<LocalAccumulator> {
 
     let state = HashMapState {
         hash_lookup: DashMap::new(),
+        global_buffer: AsyncInitializeOnce::new(),
     };
 
     let (shards_to_compact_sender, shards_to_compact_receiver) = flume::bounded(shard_count);
@@ -709,8 +710,6 @@ pub fn create_local_accumulators(count: usize) -> Vec<LocalAccumulator> {
 
     let eventually_consume_batch_list = Arc::new(EventuallyConsume::new());
     let compact_batch_list_once = Arc::new(AsyncInitializeOnce::new());
-
-    let global_buffer_initializer = Arc::new(AsyncInitializeOnce::new());
 
     (0..count)
         .into_iter()
@@ -732,7 +731,6 @@ pub fn create_local_accumulators(count: usize) -> Vec<LocalAccumulator> {
                     Arc::clone(&eventually_consume_batch_list),
                     Arc::clone(&compact_batch_list_once),
                     Arc::clone(&perform_by_last_owner),
-                    global_buffer_initializer.clone(),
                 ),
             )
         })
@@ -773,7 +771,7 @@ mod tests {
     use futures::StreamExt;
     use tokio::spawn;
 
-    use crate::operator::version6::hash_lookup_builder::create_local_accumulators;
+    use crate::operator::version8::hash_lookup_builder::create_local_accumulators;
     use crate::utils::index_lookup::IndexLookup;
 
     #[tokio::test]

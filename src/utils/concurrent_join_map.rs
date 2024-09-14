@@ -204,7 +204,7 @@ where T: Eq + Hash + Clone {
     }
 
     pub fn entry_count(&self) -> usize {
-        self.map.len() + self.overflow.len()
+        self.map.len() + self.overflow.iter().filter(|i| **i != 0usize).count()
     }
 }
 

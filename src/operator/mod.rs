@@ -10,4 +10,5 @@ mod version4;
 mod version5;
 mod version6;
 mod version7;
+mod version8;
 pub mod lookup_consumers;
