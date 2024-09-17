@@ -82,18 +82,18 @@ impl ParallelHashJoinStream {
         future_to_record_batch_stream(
             output_schema.clone(),
             async move {
-                let (probe_expressions, build_expressions): (Vec<_>, Vec<_>) =
+                let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
                     on.into_iter().unzip();
                 let probe_lookup = PerformProbeLookup::new(
                     output_schema,
-                    left,
-                    probe_expressions,
+                    right,
+                    right_expressions,
                     probe_lookup_implementation,
                 );
-                let stream = build_implementation.build_right_side(
+                let stream = build_implementation.build_side(
                     partition,
-                    right,
-                    &build_expressions,
+                    left,
+                    &left_expressions,
                     probe_lookup
                 ).await??;
                 Ok(stream)

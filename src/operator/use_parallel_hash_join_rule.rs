@@ -21,7 +21,7 @@ impl UseParallelHashJoinRule {
 }
 
 impl PhysicalOptimizerRule for UseParallelHashJoinRule {
-    fn optimize(&self, plan: Arc<dyn ExecutionPlan>, config: &ConfigOptions) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
+    fn optimize(&self, plan: Arc<dyn ExecutionPlan>, _config: &ConfigOptions) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
         Ok(plan.transform(|plan| transform(&self.version, plan))?.data)
     }
 
@@ -41,8 +41,8 @@ fn transform(version: &JoinReplacement, plan: Arc<dyn ExecutionPlan>) -> Result<
                 Ok(new_operator) => {
                     Ok(Transformed::yes(Arc::new(new_operator)))
                 },
-                Err(error) => {
-                    println!("Failed to apply ParallelJoin operator due to: {}", error);
+                Err(_error) => {
+                    // println!("Failed to apply ParallelJoin operator due to: {}", error);
                     Ok(Transformed::no(plan))
                 }
             }

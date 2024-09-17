@@ -1,3 +1,5 @@
+mod utils;
+
 use std::future::Future;
 use std::panic;
 use std::sync::Arc;
@@ -168,7 +170,7 @@ impl BenchmarkQuery for Size512 {
             let implementation = Arc::clone(&implementation);
             let physical_expr = physical_expr.clone();
             join_set.spawn(async move {
-                implementation.build_right_side(
+                implementation.build_side(
                     i,
                     stream,
                     &physical_expr,

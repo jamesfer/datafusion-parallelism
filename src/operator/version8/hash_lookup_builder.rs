@@ -336,7 +336,9 @@ impl SharedCompactor {
         // Once the last thread has written all the data to the state, we can finally build a
         // concise read only lookup map
         let join_map_result = self.build_join_map_when_last.run(self.state, |state| {
-            Arc::new(ReadOnlyJoinMap::new(state.hash_lookup.into_read_only(), state.global_buffer.to_vec()))
+            let global_buffer = state.global_buffer.into_inner()
+                .expect("Global buffer consumed before it was initialized");
+            Arc::new(ReadOnlyJoinMap::new(state.hash_lookup.into_read_only(), global_buffer.to_vec()))
         });
 
         // Wait for the record batch and join map futures. It doesn't matter which order we do it in
@@ -382,7 +384,7 @@ impl SharedCompactor {
         // Send shard contents to sender
         if let Some(owned_shard_contents) = LimitedRc::into_inner(shared_shard_contents) {
             // Build the global buffer
-            let global_buffer = Arc::new(GlobalBuffer::new(offset_tracker.get().offset + 1));
+            let global_buffer = GlobalBuffer::new(offset_tracker.get().offset + 1);
             state.global_buffer.run_first(|| async { global_buffer })
                 .expect("Another thread tried to build the global buffer")
                 .await;
@@ -505,8 +507,8 @@ impl GlobalBuffer {
     }
 
     pub unsafe fn set(&self, index: usize, value: usize) {
-        let x = self.vec.get();
-        x[index] = value;
+        let vec = &mut *self.vec.get();
+        vec[index] = value;
         // self.vec[index].store(value, Ordering::Relaxed);
     }
 

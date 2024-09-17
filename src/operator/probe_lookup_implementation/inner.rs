@@ -48,6 +48,7 @@ pub fn inner_join_streaming_lookup<Lookup>(
 ) -> impl PlainRecordBatchStream
     where Lookup: IndexLookup<u64> + Sync + Send {
 
+    // println!("Starting stream lookup. Build size: {}, schema: {}", build_side_records.num_rows(), build_side_records.schema().fields.iter().map(|f| f.name()).fold(String::new(), |a, b| a + b + ","));
     probe_stream
         .map(move |result_probe_batch| -> Result<RecordBatch, DataFusionError> {
             let probe_batch = result_probe_batch?;
@@ -59,10 +60,12 @@ pub fn inner_join_streaming_lookup<Lookup>(
             // Find matching rows from build side
             let (probe_indices, build_indices) = get_matching_indices(&probe_hashes, &read_only_join_map);
 
-            let output_columns = probe_batch.columns().iter()
-                .map(|array| arrow::compute::take(array, &probe_indices, None))
-                .chain(build_side_records.columns().iter()
-                    .map(|array| arrow::compute::take(array, &build_indices, None)))
+            let output_columns = build_side_records.columns().iter()
+                .map(|array| arrow::compute::take(array, &build_indices, None))
+                .chain(
+                    probe_batch.columns().iter()
+                        .map(|array| arrow::compute::take(array, &probe_indices, None))
+                )
                 .collect::<Result<Vec<ArrayRef>, ArrowError>>()?;
             return Ok(RecordBatch::try_new(output_schema.clone(), output_columns)?);
         })

@@ -39,7 +39,7 @@ impl BuildImplementation {
         }
     }
 
-    pub async fn build_right_side<Consumer>(
+    pub async fn build_side<Consumer>(
         &self,
         partition: usize,
         stream: SendableRecordBatchStream,
@@ -48,6 +48,7 @@ impl BuildImplementation {
     ) -> Result<Consumer::R, DataFusionError>
         where Consumer: IndexLookupConsumer + Send,
     {
+        // TODO change all method names
         match self {
             BuildImplementation::Version1(version1) => version1.build_right_side(
                 partition,

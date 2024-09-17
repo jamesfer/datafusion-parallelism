@@ -50,6 +50,8 @@ impl Version1 {
             state.compacted_join_map_receiver,
         ).await?;
 
+        // println!("Build side complete: {}", read_only_join_map.entry_count());
+
         Ok(SimpleIndexLookupProvider::new(read_only_join_map, build_side_records))
         // Ok(consume.call(read_only_join_map, build_side_records))
     }
