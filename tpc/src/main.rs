@@ -31,6 +31,8 @@ arg_enum! {
         Version5,
         Version6,
         Version7,
+        Version8,
+        Version9,
     }
 }
 
@@ -44,6 +46,8 @@ impl Into<datafusion_parallelism::parse_sql::JoinReplacement> for JoinReplacemen
             JoinReplacement::Version5 => datafusion_parallelism::parse_sql::JoinReplacement::New5,
             JoinReplacement::Version6 => datafusion_parallelism::parse_sql::JoinReplacement::New6,
             JoinReplacement::Version7 => datafusion_parallelism::parse_sql::JoinReplacement::New7,
+            JoinReplacement::Version8 => datafusion_parallelism::parse_sql::JoinReplacement::New8,
+            JoinReplacement::Version9 => datafusion_parallelism::parse_sql::JoinReplacement::New9,
         }
     }
 }
@@ -93,6 +97,10 @@ struct Opt {
 
     #[structopt(long, possible_values = &JoinReplacement::variants(), case_insensitive=true)]
     new_join_replacement: Option<JoinReplacement>,
+
+    /// Print query plan
+    #[structopt(long)]
+    print_plan: bool,
 }
 
 #[derive(Debug, PartialEq, Serialize, Default)]
@@ -164,11 +172,7 @@ pub async fn main() -> Result<()> {
 
     // Add new physical optimizer rule if needed
     // This code was added to the original script
-    let mut optimizer_rules = PhysicalOptimizer::default().rules;
-    if let Some(use_new_join_rule) = opt.new_join_replacement {
-        optimizer_rules.insert(0, Arc::new(UseParallelHashJoinRule::new(use_new_join_rule.into())));
-    }
-
+    let optimizer_rules = UseParallelHashJoinRule::optimizer_rules(opt.new_join_replacement.map(|x| x.into()), false);
 
     let runtime = Arc::new(RuntimeEnv::default());
     let state = SessionState::new_with_config_rt(config, runtime)
@@ -205,6 +209,7 @@ pub async fn main() -> Result<()> {
                 &output_path,
                 opt.iterations,
                 &mut results,
+                opt.print_plan,
             )
                 .await?;
         }
@@ -224,6 +229,7 @@ pub async fn main() -> Result<()> {
                     &output_path,
                     opt.iterations,
                     &mut results,
+                    opt.print_plan,
                 )
                     .await;
                 match result {
@@ -261,6 +267,7 @@ pub async fn execute_query(
     output_path: &str,
     iterations: u8,
     results: &mut Results,
+    print_plan: bool,
 ) -> Result<()> {
     let filename = format!("{}/q{query_no}.sql", query_path);
     println!("Executing query {} from {}", query_no, filename);
@@ -292,6 +299,15 @@ pub async fn execute_query(
 
             let start = Instant::now();
             let df = ctx.sql(sql).await?;
+
+            if print_plan && iteration == 0 {
+                let plan = df.clone().into_optimized_plan()?;
+                println!("{}", plan.display_indent());
+
+                let exec = df.clone().create_physical_plan().await?;
+                println!("{}", displayable(exec.as_ref()).indent(false));
+            }
+
             let batches = df.clone().collect().await?;
             let duration = start.elapsed();
             total_duration_millis += duration.as_millis();

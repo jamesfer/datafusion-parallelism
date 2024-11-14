@@ -4,10 +4,10 @@ use crossbeam::atomic::AtomicCell;
 use datafusion::arrow::array::RecordBatch;
 
 use crate::utils::limited_rc::LimitedRc;
-use crate::utils::partitioned_concurrent_join_map::{create_writable_join_map, WritablePartitionedConcurrentJoinMap};
+use crate::utils::partitioned_concurrent_self_hash_join_map::{create_writable_self_hash_join_map, WritablePartitionedConcurrentSelfHashJoinMap};
 
 pub struct ParallelJoinExecutionStateInstance {
-    pub join_map: WritablePartitionedConcurrentJoinMap,
+    pub join_map: WritablePartitionedConcurrentSelfHashJoinMap,
     pub batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
 }
 
@@ -23,7 +23,7 @@ pub struct ParallelJoinExecutionState {
 
 impl ParallelJoinExecutionState {
     pub fn new(parallelism: usize) -> Self {
-        let states = create_writable_join_map(parallelism)
+        let states = create_writable_self_hash_join_map(parallelism)
             .into_iter()
             .zip(LimitedRc::new_copies(boxcar::Vec::new(), parallelism).into_iter())
             .map(|(join_map, batch_list)| AtomicCell::new(Some(ParallelJoinExecutionStateInstance {

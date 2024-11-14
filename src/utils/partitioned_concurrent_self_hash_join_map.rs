@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::mem;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::utils::index_lookup::IndexLookup;
 use crate::utils::limited_rc::LimitedRc;
 use crate::utils::once_notify::OnceNotify;
+use crate::utils::self_hash_map_types::{new_self_hash_map, new_self_hash_map_with_capacity, SelfHashMap};
 
 const fn ptr_size_bits() -> usize {
     mem::size_of::<usize>() * 8
@@ -16,14 +16,14 @@ const fn determine_shard(hash: u64, shard_count: usize) -> usize {
 }
 
 pub struct Segment {
-    lookup: HashMap<u64, (usize, usize)>,
+    lookup: SelfHashMap<(usize, usize)>,
     buffer: Vec<(usize, usize)>,
 }
 
 impl Segment {
     fn empty() -> Self {
         Segment {
-            lookup: HashMap::new(),
+            lookup: new_self_hash_map(),
             buffer: vec![(0, 0)],
         }
     }
@@ -32,7 +32,7 @@ impl Segment {
         Self {
             // Estimate that the size of the hash map will be half the size of the number of
             // elements
-            lookup: HashMap::with_capacity(size / 2),
+            lookup: new_self_hash_map_with_capacity(size / 2),
             buffer: vec![(0, 0); size + 1],
         }
     }
@@ -89,10 +89,10 @@ pub struct LocalShardListBuilder {
 }
 
 impl LocalShardListBuilder {
-    pub async fn compact_into_read_only_join_map(mut self) -> ReadonlyPartitionedConcurrentJoinMap {
+    pub async fn compact_into_read_only_join_map(mut self) -> ReadonlyPartitionedConcurrentSelfHashJoinMap {
         Self::compact_shards_cooperatively(self.receiver, self.compacted_shards_sender).await;
         let shards = Self::wait_for_completed_shards(self.shard_count, &mut self.compacted_receiver).await;
-        ReadonlyPartitionedConcurrentJoinMap { shards }
+        ReadonlyPartitionedConcurrentSelfHashJoinMap { shards }
     }
 
     async fn compact_shards_cooperatively(receiver: flume::Receiver<(usize, Shard)>, compacted_shards_sender: tokio::sync::broadcast::Sender<(usize, Arc<Segment>)>) {
@@ -242,13 +242,13 @@ impl ShardCompactor {
     }
 }
 
-pub struct WritablePartitionedConcurrentJoinMap {
+pub struct WritablePartitionedConcurrentSelfHashJoinMap {
     global_offset: LimitedRc<Mutex<(usize, usize)>>,
     shards: LimitedRc<Vec<Shard>>,
     shard_compactor: ShardCompactor,
 }
 
-impl WritablePartitionedConcurrentJoinMap {
+impl WritablePartitionedConcurrentSelfHashJoinMap {
     fn new(
         global_offset: LimitedRc<Mutex<(usize, usize)>>,
         shards: LimitedRc<Vec<Shard>>,
@@ -290,18 +290,18 @@ impl WritablePartitionedConcurrentJoinMap {
         self.shard_compactor.distribute_shards(self.shards).await
     }
 
-    pub async fn compact(self) -> ReadonlyPartitionedConcurrentJoinMap {
-        ReadonlyPartitionedConcurrentJoinMap {
+    pub async fn compact(self) -> ReadonlyPartitionedConcurrentSelfHashJoinMap {
+        ReadonlyPartitionedConcurrentSelfHashJoinMap {
             shards: self.shard_compactor.compact(self.shards).await,
         }
     }
 }
 
-pub struct ReadonlyPartitionedConcurrentJoinMap {
+pub struct ReadonlyPartitionedConcurrentSelfHashJoinMap {
     shards: Vec<Arc<Segment>>,
 }
 
-impl IndexLookup<u64> for ReadonlyPartitionedConcurrentJoinMap {
+impl IndexLookup<u64> for ReadonlyPartitionedConcurrentSelfHashJoinMap {
     type It<'a> = ReadOnlyJoinMapIterator<'a>;
 
     fn get_iter<'a>(&'a self, hash: &'a u64) -> Self::It<'a> {
@@ -353,7 +353,7 @@ fn default_shard_amount() -> usize {
     })
 }
 
-pub fn create_writable_join_map(count: usize) -> Vec<WritablePartitionedConcurrentJoinMap> {
+pub fn create_writable_self_hash_join_map(count: usize) -> Vec<WritablePartitionedConcurrentSelfHashJoinMap> {
     let shard_number = default_shard_amount();
     let shards = (0..shard_number).map(|_| Shard::new_empty()).collect();
 
@@ -369,7 +369,7 @@ pub fn create_writable_join_map(count: usize) -> Vec<WritablePartitionedConcurre
     global_offset.into_iter()
         .zip(shard_copies.into_iter())
         .zip(compactors.into_iter())
-        .map(|((global_offset, shards), compactor)| WritablePartitionedConcurrentJoinMap::new(global_offset, shards, compactor))
+        .map(|((global_offset, shards), compactor)| WritablePartitionedConcurrentSelfHashJoinMap::new(global_offset, shards, compactor))
         .collect()
 }
 

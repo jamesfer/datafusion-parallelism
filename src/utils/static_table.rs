@@ -45,10 +45,31 @@ impl StaticTable {
     pub fn new(schema: SchemaRef, data: Vec<RecordBatch>) -> Self {
         let statistics = Self::make_statistics(&schema, &data);
         let data_stream = StaticPartitionStream { schema: schema.clone(), data };
-        let table = StreamingTable::try_new(schema.clone(), vec![Arc::new(data_stream)]).unwrap();
+        let streaming_table = StreamingTable::try_new(schema.clone(), vec![Arc::new(data_stream)]).unwrap();
         Self {
             statistics,
-            streaming_table: table,
+            streaming_table,
+        }
+    }
+
+    pub fn new_with_fixed_row_count(schema: SchemaRef, data: Vec<RecordBatch>, row_count: usize) -> Self {
+        let mut statistics = Self::make_statistics(&schema, &data);
+        statistics.num_rows = Precision::Exact(row_count);
+
+        let data_stream = StaticPartitionStream { schema: schema.clone(), data };
+        let streaming_table = StreamingTable::try_new(schema.clone(), vec![Arc::new(data_stream)]).unwrap();
+        Self {
+            statistics,
+            streaming_table,
+        }
+    }
+
+    pub fn new_with_fixed_statistics(schema: SchemaRef, data: Vec<RecordBatch>, statistics: Statistics) -> Self {
+        let data_stream = StaticPartitionStream { schema: schema.clone(), data };
+        let streaming_table = StreamingTable::try_new(schema.clone(), vec![Arc::new(data_stream)]).unwrap();
+        Self {
+            statistics,
+            streaming_table,
         }
     }
 

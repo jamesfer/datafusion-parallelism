@@ -3,23 +3,23 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use criterion::async_executor::AsyncExecutor;
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use datafusion::arrow::array::AsArray;
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::{CatalogProvider, SchemaProvider};
 use datafusion::datasource::TableProvider;
 use datafusion::execution::context::SessionState;
-use datafusion_physical_plan::streaming::PartitionStream;
 use datafusion_physical_plan::{DisplayAs, ExecutionPlan};
+use datafusion_physical_plan::streaming::PartitionStream;
 use futures_core::future::BoxFuture;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Runtime};
 
-use datafusion_parallelism::api_utils::{make_int_array_with_shift, make_string_array, make_string_constant_array};
-use datafusion_parallelism::parse_sql::{make_session_state_with_target_partitions, JoinReplacement};
+use datafusion_parallelism::api_utils::{make_exponential_int_array, make_int_array_with_shift, make_string_array, make_string_constant_array};
+use datafusion_parallelism::parse_sql::{JoinReplacement, make_session_state, make_session_state_with_target_partitions};
 
 use crate::utils::prepare_query::prepare_query;
 use crate::utils::register_tables::register_tables;
@@ -50,18 +50,17 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let sessions = vec![
         // ("control", make_session_state_with_target_partitions(None, Some(PARALLELISM))),
-        // ("version1", make_session_state_with_target_partitions(Some(JoinReplacement::Original), Some(PARALLELISM))),
+        ("version1", make_session_state_with_target_partitions(Some(JoinReplacement::Original), Some(PARALLELISM))),
         // ("version2", make_session_state_with_target_partitions(Some(JoinReplacement::New), Some(PARALLELISM))),
         // ("version3", make_session_state(Some(JoinReplacement::New3))),
         // ("version4", make_session_state(Some(JoinReplacement::New4))),
         // ("version5", make_session_state(Some(JoinReplacement::New5))),
         // ("version6", make_session_state_with_target_partitions(Some(JoinReplacement::New6), Some(PARALLELISM))),
         // ("version8", make_session_state_with_target_partitions(Some(JoinReplacement::New8), Some(PARALLELISM))),
-        ("version9", make_session_state_with_target_partitions(Some(JoinReplacement::New9), Some(PARALLELISM))),
     ];
 
     for test in tests {
-        let mut group = c.benchmark_group(format!("LinearDist/{}", test.name()));
+        let mut group = c.benchmark_group(test.name());
 
         for (name, session) in sessions.iter() {
             let mut operation = rt.block_on(test.run(&session));
@@ -146,6 +145,121 @@ trait BenchmarkQuery {
     fn name(&self) -> &str;
 
     fn run<'a>(&self, session_state: &'a SessionState) -> BoxFuture<'a, Box<dyn FnMut() -> BoxFuture<'a, Vec<RecordBatch>> + 'a>>;
+}
+
+struct AllEqualSize;
+
+impl BenchmarkQuery for AllEqualSize {
+    fn name(&self) -> &str {
+        "AllEqualSize"
+    }
+
+    fn run<'a>(&self, session_state: &'a SessionState) -> BoxFuture<'a, Box<dyn FnMut() -> BoxFuture<'a, Vec<RecordBatch>> + 'a>> {
+        Box::pin(async move {
+            let base_data =
+                (0..100).into_iter()
+                    .map(|i| {
+                        RecordBatch::try_new(
+                            base_table_schema(),
+                            vec![
+                                Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, 1)),
+                                Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, 2)),
+                                Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, 3)),
+                                Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, 4)),
+                                Arc::new(make_string_constant_array("hello".to_string(), 1024)),
+                            ],
+                        ).unwrap()
+                    })
+                    .collect::<Vec<_>>();
+
+            let join_tables = (1..5)
+                .map(|table_number| {
+                    let data =
+                        (0..10).into_iter()
+                            .map(|i| {
+                                RecordBatch::try_new(
+                                    small_table_schema(),
+                                    vec![
+                                        Arc::new(make_exponential_int_array(i * 1024, (i + 1) * 1024)),
+                                        Arc::new(make_string_constant_array("world".to_string(), 1024)),
+                                    ],
+                                ).unwrap()
+                            })
+                            .collect::<Vec<_>>();
+                    (format!("small_table_{table_number}"), small_table_schema(), data)
+                })
+                .collect::<Vec<_>>();
+
+            register_tables(
+                session_state,
+                vec![("base_table".to_string(), base_table_schema(), base_data)]
+                    .into_iter()
+                    .chain(join_tables.into_iter())
+                    .collect::<Vec<_>>(),
+            );
+
+            // Plan query
+            prepare_query(session_state, FOUR_TABLE_SQL).await
+        })
+    }
+}
+
+struct MuchLargerProbeSize;
+
+impl BenchmarkQuery for MuchLargerProbeSize {
+    fn name(&self) -> &str {
+        "MuchLargerProbeSize"
+    }
+
+    fn run<'a>(&self, session_state: &'a SessionState) -> BoxFuture<'a, Box<dyn FnMut() -> BoxFuture<'a, Vec<RecordBatch>> + 'a>> {
+        Box::pin(async move {
+            let base_data =
+                (0..10000).into_iter()
+                    .map(|i| {
+                        let i = i % 100;
+                        RecordBatch::try_new(
+                            base_table_schema(),
+                            vec![
+                                Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, 1)),
+                                Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, 2)),
+                                Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, 3)),
+                                Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, 4)),
+                                Arc::new(make_string_constant_array("hello".to_string(), 1024)),
+                            ],
+                        ).unwrap()
+                    })
+                    .collect::<Vec<_>>();
+
+            let join_tables = (1..5)
+                .map(|table_number| {
+                    let data =
+                        (0..100).into_iter()
+                            .map(|i| {
+                                RecordBatch::try_new(
+                                    small_table_schema(),
+                                    vec![
+                                        Arc::new(make_int_array_with_shift(i * 1024, (i + 1) * 1024, table_number)),
+                                        Arc::new(make_string_constant_array("world".to_string(), 1024)),
+                                    ],
+                                ).unwrap()
+                            })
+                            .collect::<Vec<_>>();
+                    (format!("small_table_{table_number}"), small_table_schema(), data)
+                })
+                .collect::<Vec<_>>();
+
+            register_tables(
+                session_state,
+                vec![("base_table".to_string(), base_table_schema(), base_data)]
+                    .into_iter()
+                    .chain(join_tables.into_iter())
+                    .collect::<Vec<_>>(),
+            );
+
+            // Plan query
+            prepare_query(session_state, FOUR_TABLE_SQL).await
+        })
+    }
 }
 
 struct Size256;

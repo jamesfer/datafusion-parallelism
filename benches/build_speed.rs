@@ -22,7 +22,7 @@ use futures_core::future::BoxFuture;
 use tokio::runtime::Builder;
 use tokio::task::JoinSet;
 
-use datafusion_parallelism::api_utils::{make_int_array, make_string_constant_array};
+use datafusion_parallelism::api_utils::{make_int_array_with_shift, make_string_constant_array};
 use datafusion_parallelism::operator::build_implementation::{BuildImplementation};
 use datafusion_parallelism::operator::lookup_consumers::IndexLookupConsumer;
 use datafusion_parallelism::parse_sql::JoinReplacement;
@@ -34,12 +34,12 @@ fn make_config() -> Criterion {
         .measurement_time(Duration::from_secs(60))
 }
 
+// Number of power cores on an Apple M1 max
 const PARALLELISM: usize = 8;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let rt = Builder::new_multi_thread()
         .enable_all()
-        // Number of power cores on an Apple M1 max
         .worker_threads(PARALLELISM)
         .build()
         .unwrap();
@@ -50,12 +50,14 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let sessions: Vec<(&str, Box<dyn Fn() -> BuildImplementation + Sync>)> = vec![
         ("version1", Box::new(|| BuildImplementation::new(JoinReplacement::Original, PARALLELISM))),
-        // ("version2", make_session_state(Some(JoinReplacement::New))),
+        ("version2", Box::new(|| BuildImplementation::new(JoinReplacement::New, PARALLELISM))),
         ("version3", Box::new(|| BuildImplementation::new(JoinReplacement::New3, PARALLELISM))),
-        ("version4", Box::new(|| BuildImplementation::new(JoinReplacement::New4, PARALLELISM))),
-        ("version5", Box::new(|| BuildImplementation::new(JoinReplacement::New5, PARALLELISM))),
-        ("version6", Box::new(|| BuildImplementation::new(JoinReplacement::New6, PARALLELISM))),
-        ("version7", Box::new(|| BuildImplementation::new(JoinReplacement::New7, PARALLELISM))),
+        // ("version4", Box::new(|| BuildImplementation::new(JoinReplacement::New4, PARALLELISM))),
+        // ("version5", Box::new(|| BuildImplementation::new(JoinReplacement::New5, PARALLELISM))),
+        // ("version6", Box::new(|| BuildImplementation::new(JoinReplacement::New6, PARALLELISM))),
+        // ("version7", Box::new(|| BuildImplementation::new(JoinReplacement::New7, PARALLELISM))),
+        // ("version7", Box::new(|| BuildImplementation::new(JoinReplacement::New7, PARALLELISM))),
+        ("version8", Box::new(|| BuildImplementation::new(JoinReplacement::New8, PARALLELISM))),
     ];
 
     for scenario in scenarios {
@@ -144,7 +146,7 @@ impl BenchmarkQuery for Size512 {
                         RecordBatch::try_new(
                             Arc::clone(&schema),
                             vec![
-                                Arc::new(make_int_array(i * batch_size, (i + 1) * batch_size, 0)),
+                                Arc::new(make_int_array_with_shift(i * batch_size, (i + 1) * batch_size, 0)),
                                 Arc::new(make_string_constant_array("world".to_string(), batch_size)),
                             ],
                         ).unwrap()

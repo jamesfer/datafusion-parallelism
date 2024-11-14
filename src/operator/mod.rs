@@ -1,7 +1,7 @@
 pub mod use_parallel_hash_join_rule;
-mod parallel_hash_join;
+pub mod parallel_hash_join;
 pub mod build_implementation;
-mod parallel_hash_join_stream;
+mod parallel_hash_join_executor;
 mod probe_lookup_implementation;
 mod version1;
 mod version2;
@@ -12,3 +12,4 @@ mod version6;
 mod version7;
 mod version8;
 pub mod lookup_consumers;
+mod version9;

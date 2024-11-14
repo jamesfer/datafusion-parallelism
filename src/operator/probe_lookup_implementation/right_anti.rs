@@ -1,3 +1,7 @@
+use crate::shared::datafusion_private::{equal_rows_arr, get_anti_indices};
+use crate::shared::shared::{calculate_hash, evaluate_expressions, get_matching_indices, ProbeBuildIndices};
+use crate::utils::index_lookup::IndexLookup;
+use crate::utils::plain_record_batch_stream::{PlainRecordBatchStream, SendablePlainRecordBatchStream};
 use datafusion::arrow;
 use datafusion::arrow::array::{ArrayRef, RecordBatch};
 use datafusion::arrow::datatypes::SchemaRef;
@@ -6,17 +10,14 @@ use datafusion::execution::SendableRecordBatchStream;
 use datafusion_common::DataFusionError;
 use datafusion_physical_expr::PhysicalExprRef;
 use futures::stream::StreamExt;
-use crate::shared::datafusion_private::equal_rows_arr;
-use crate::shared::shared::{calculate_hash, evaluate_expressions, get_matching_indices, take_multiple_record_batch, ProbeBuildIndices};
-use crate::utils::index_lookup::IndexLookup;
-use crate::utils::plain_record_batch_stream::SendablePlainRecordBatchStream;
 
+// Right side is the probe side
 #[derive(Debug)]
-pub struct InnerJoinProbeLookupStream {
+pub struct RightAntiProbeLookupStream {
     parallelism: usize,
 }
 
-impl InnerJoinProbeLookupStream {
+impl RightAntiProbeLookupStream {
     pub fn new(parallelism: usize) -> Self {
         Self { parallelism }
     }
@@ -31,21 +32,42 @@ impl InnerJoinProbeLookupStream {
         read_only_join_map: Lookup
     ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
         where Lookup: IndexLookup<u64> + Send + Sync + 'static {
-        Ok(Box::pin(probe_stream
-            .map(move |result_probe_batch| -> Result<RecordBatch, DataFusionError> {
-                lookup_inner_join_probe_batch(
-                    &join_schema,
-                    &probe_expressions,
-                    &build_expressions,
-                    &build_side_records,
-                    &read_only_join_map,
-                    &result_probe_batch?,
-                )
-            })))
+        Ok(Box::pin(right_anti_join_streaming_lookup(
+            join_schema,
+            probe_stream,
+            probe_expressions,
+            build_expressions,
+            build_side_records,
+            read_only_join_map,
+        )))
     }
 }
 
-fn lookup_inner_join_probe_batch<Lookup>(
+fn right_anti_join_streaming_lookup<Lookup>(
+    output_schema: SchemaRef,
+    probe_stream: SendableRecordBatchStream,
+    probe_expressions: Vec<PhysicalExprRef>,
+    build_expressions: Vec<PhysicalExprRef>,
+    build_side_records: RecordBatch,
+    read_only_join_map: Lookup,
+) -> impl PlainRecordBatchStream
+    where Lookup: IndexLookup<u64> + Sync + Send {
+
+    probe_stream
+        .map(move |result_probe_batch| -> Result<RecordBatch, DataFusionError> {
+            let probe_batch = result_probe_batch?;
+            lookup_right_anti_join_probe_batch(
+                &output_schema,
+                &probe_expressions,
+                &build_expressions,
+                &build_side_records,
+                &read_only_join_map,
+                &probe_batch,
+            )
+        })
+}
+
+fn lookup_right_anti_join_probe_batch<Lookup>(
     output_schema: &SchemaRef,
     probe_expressions: &Vec<PhysicalExprRef>,
     build_expressions: &Vec<PhysicalExprRef>,
@@ -66,7 +88,7 @@ where
 
     // Filter out rows that don't have equal values, protecting against hash collisions
     let build_keys = evaluate_expressions(&build_expressions, &build_side_records)?;
-    let (build_indices, probe_indices) = equal_rows_arr(
+    let (_, probe_indices) = equal_rows_arr(
         &build_indices,
         &probe_indices,
         build_keys.as_ref(),
@@ -75,11 +97,7 @@ where
         false,
     )?;
 
-    // TODO support filter
-
-    let output_columns = take_multiple_record_batch(vec![
-        (build_side_records, &build_indices),
-        (probe_batch, &probe_indices),
-    ])?;
-    Ok(RecordBatch::try_new(output_schema.clone(), output_columns)?)
+    // Anti joins need to use unmatched probe indices
+    let unmatched_probe_indices = get_anti_indices(0usize..probe_batch.num_rows(), &probe_indices);
+    Ok(arrow::compute::take_record_batch(probe_batch, &unmatched_probe_indices)?)
 }

@@ -18,6 +18,8 @@ pub enum JoinReplacement {
     New5,
     New6,
     New7,
+    New8,
+    New9,
 }
 
 pub fn make_session_state(use_new_join_rule: Option<JoinReplacement>) -> SessionState {
@@ -28,14 +30,16 @@ pub fn make_session_state_with_target_partitions(
     use_new_join_rule: Option<JoinReplacement>,
     target_partitions: Option<usize>,
 ) -> SessionState {
-    // Use the physical optimizer
-    let mut optimizer_rules = PhysicalOptimizer::default().rules;
-    if let Some(replacement) = use_new_join_rule {
-        // Insert the swap rule after joins are selected
-        optimizer_rules.insert(3, Arc::new(UseParallelHashJoinRule::new(replacement)));
-        println!("{:?}", optimizer_rules.iter().map(|rule| rule.name()).collect::<Vec<_>>());
-    }
+    make_session_state_with_config(use_new_join_rule, target_partitions, false)
+}
 
+pub fn make_session_state_with_config(
+    use_new_join_rule: Option<JoinReplacement>,
+    target_partitions: Option<usize>,
+    replacement_required: bool,
+) -> SessionState {
+    // Use the physical optimizer
+    let optimizer_rules = UseParallelHashJoinRule::optimizer_rules(use_new_join_rule, replacement_required);
     let mut options = ConfigOptions::default();
     options.sql_parser.dialect = "postgres".to_string();
     if let Some(target_partitions) = target_partitions {

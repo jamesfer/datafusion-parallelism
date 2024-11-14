@@ -3,7 +3,7 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::catalog::{CatalogProvider, MemoryCatalogProvider, MemorySchemaProvider, SchemaProvider};
 use datafusion::execution::context::SessionState;
-use crate::utils::static_table::StaticTable;
+use datafusion_parallelism::utils::static_table::StaticTable;
 
 pub fn register_tables(session_state: &SessionState, tables: Vec<(String, SchemaRef, Vec<RecordBatch>)>) {
     // Register all tables

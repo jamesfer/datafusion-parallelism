@@ -18,14 +18,21 @@ use crate::utils::plain_record_batch_stream::PlainRecordBatchStream;
 
 struct PerformProbeLookup {
     output_schema: SchemaRef,
-    left: SendableRecordBatchStream,
+    probe_stream: SendableRecordBatchStream,
     probe_expressions: Vec<PhysicalExprRef>,
     probe_stream_lookup: Arc<ProbeLookupStreamImplementation>,
+    build_expressions: Vec<PhysicalExprRef>,
 }
 
 impl PerformProbeLookup {
-    pub fn new(output_schema: SchemaRef, left: SendableRecordBatchStream, probe_expressions: Vec<PhysicalExprRef>, probe_stream_lookup: Arc<ProbeLookupStreamImplementation>) -> Self {
-        Self { output_schema, left, probe_expressions, probe_stream_lookup }
+    pub fn new(
+        output_schema: SchemaRef,
+        probe_stream: SendableRecordBatchStream,
+        probe_expressions: Vec<PhysicalExprRef>,
+        probe_stream_lookup: Arc<ProbeLookupStreamImplementation>,
+        build_expressions: Vec<PhysicalExprRef>,
+    ) -> Self {
+        Self { output_schema, probe_stream, probe_expressions, probe_stream_lookup, build_expressions }
     }
 }
 
@@ -40,8 +47,9 @@ impl IndexLookupConsumer for PerformProbeLookup {
         where Lookup: IndexLookup<u64> + Sync + Send + 'static {
         let result = self.probe_stream_lookup.streaming_probe_lookup(
             self.output_schema,
-            self.left,
+            self.probe_stream,
             self.probe_expressions,
+            self.build_expressions,
             build_side_records,
             index_lookup,
         );
@@ -53,12 +61,12 @@ impl IndexLookupConsumer for PerformProbeLookup {
 }
 
 #[derive(Debug)]
-pub struct ParallelHashJoinStream {
+pub struct ParallelHashJoinExecutor {
     build_implementation: Arc<BuildImplementation>,
     probe_lookup_implementation: Arc<ProbeLookupStreamImplementation>,
 }
 
-impl ParallelHashJoinStream {
+impl ParallelHashJoinExecutor {
     pub fn new(parallelism: usize, build_implementation_version: JoinReplacement, join_type: JoinType) -> Self {
         Self {
             // Create the build implementation based on the chosen replacement
@@ -68,32 +76,33 @@ impl ParallelHashJoinStream {
         }
     }
 
-    pub fn perform_streaming_join(
+    pub fn execute_streaming_join(
         &self,
         partition: usize,
-        left: SendableRecordBatchStream,
-        right: SendableRecordBatchStream,
+        build_stream: SendableRecordBatchStream,
+        probe_stream: SendableRecordBatchStream,
         on: Vec<(PhysicalExprRef, PhysicalExprRef)>,
     ) -> SendableRecordBatchStream {
-        let output_schema = self.probe_lookup_implementation.schema(left.schema(), right.schema());
+        let output_schema = self.probe_lookup_implementation.schema(build_stream.schema(), probe_stream.schema());
         let probe_lookup_implementation = Arc::clone(&self.probe_lookup_implementation);
         let build_implementation = Arc::clone(&self.build_implementation);
+        let (build_expressions, probe_expressions): (Vec<_>, Vec<_>) =
+            on.into_iter().unzip();
 
         future_to_record_batch_stream(
             output_schema.clone(),
             async move {
-                let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
-                    on.into_iter().unzip();
                 let probe_lookup = PerformProbeLookup::new(
                     output_schema,
-                    right,
-                    right_expressions,
+                    probe_stream,
+                    probe_expressions,
                     probe_lookup_implementation,
+                    build_expressions.clone(),
                 );
                 let stream = build_implementation.build_side(
                     partition,
-                    left,
-                    &left_expressions,
+                    build_stream,
+                    &build_expressions,
                     probe_lookup
                 ).await??;
                 Ok(stream)

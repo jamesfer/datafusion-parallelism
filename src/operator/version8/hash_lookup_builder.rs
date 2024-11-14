@@ -1,16 +1,14 @@
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::future::Future;
-use std::hash::{BuildHasher, Hash, RandomState};
+use std::hash::Hash;
 use std::mem;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crossbeam::atomic::AtomicCell;
 use crossbeam::utils::CachePadded;
-use dashmap::{DashMap, ReadOnlyView, SharedValue};
-use datafusion::arrow::array::ArrayRef;
+use dashmap::{DashMap, SharedValue};
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
@@ -21,6 +19,7 @@ use crate::utils::async_initialize_once::AsyncInitializeOnce;
 use crate::utils::index_lookup::IndexLookup;
 use crate::utils::limited_rc::LimitedRc;
 use crate::utils::once_notify::OnceNotify;
+use crate::utils::self_hash_map_types::{new_self_dash_map, SelfHashDashMap, SelfHashReadOnlyView};
 
 #[derive(Clone, Debug)]
 struct Location {
@@ -59,15 +58,13 @@ impl OffsetTracker {
 
 #[derive(Debug)]
 struct LocalShardEntry {
-    pub global_offset: usize,
-    pub local_offset: usize,
     pub hash: u64,
-    pub internal_hash: u64,
+    pub offset: usize,
 }
 
 pub struct LocalAccumulator {
     local_shard_contents: Vec<Vec<LocalShardEntry>>,
-    reference_map: DashMap<(), ()>,
+    // The state is only used to calculate the shard for each entry
     state: LimitedRc<HashMapState>,
     // Shared among all accumulators
     batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
@@ -80,7 +77,6 @@ impl LocalAccumulator {
         shard_count: usize,
         batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
         offset_tracker: Arc<OffsetTracker>,
-        reference_map: DashMap<(), ()>,
         state: LimitedRc<HashMapState>,
         shared_compactor_constructor: SharedCompactorConstructor,
     ) -> Self {
@@ -88,14 +84,12 @@ impl LocalAccumulator {
             local_shard_contents: (0..shard_count).map(|_| vec![]).collect(),
             batch_list,
             offset_tracker,
-            reference_map,
             state,
             shared_compactor_constructor,
         }
     }
 
-    // TODO use keys when we need to verify that values match
-    pub fn add_records(&mut self, _keys: Vec<ArrayRef>, hashes: Vec<u64>, records: RecordBatch) {
+    pub fn add_records(&mut self, hashes: Vec<u64>, records: RecordBatch) {
         // Calculate new offset and batch index
         let location = self.offset_tracker.reserve(records.num_rows());
 
@@ -104,13 +98,10 @@ impl LocalAccumulator {
 
         // Locally partition keys and hashes based on shards
         for (local_offset, hash) in hashes.into_iter().enumerate() {
-            let internal_hash = self.state.hash_lookup.hasher().hash_one(&hash);
-            let shard_number = self.state.hash_lookup.determine_shard(internal_hash as usize);
+            let shard_number = self.state.hash_lookup.determine_shard(hash as usize);
             self.local_shard_contents[shard_number].push(LocalShardEntry {
-                global_offset: location.offset,
-                local_offset,
                 hash,
-                internal_hash,
+                offset: location.offset + local_offset,
             })
         }
     }
@@ -240,7 +231,7 @@ impl SharedCompactorConstructor {
 }
 
 struct HashMapState {
-    hash_lookup: DashMap<u64, usize>,
+    hash_lookup: SelfHashDashMap<usize>,
     global_buffer: AsyncInitializeOnce<GlobalBuffer>,
 }
 
@@ -262,12 +253,13 @@ pub struct SharedCompactor {
     build_join_map_when_last: Arc<PerformByLastOwner<Arc<ReadOnlyJoinMap>>>,
 
     offset_tracker: Arc<OffsetTracker>,
-    // global_buffer_initializer: Arc<AsyncInitializeOnce<Vec<AtomicCell<Option<LimitedRc<GlobalBuffer>>>>>>,
 }
 
 impl SharedCompactor {
     pub fn new(
         instance_number: usize,
+        // The outer vec has one entry per shard, the second vec has one entry per instance, and the
+        // innermost one represents the list of entries
         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
         local_shard_contents: Vec<Vec<LocalShardEntry>>,
         shards_to_compact_sender: flume::Sender<(usize, Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>)>,
@@ -277,7 +269,6 @@ impl SharedCompactor {
         state: LimitedRc<HashMapState>,
         build_join_map_when_last: Arc<PerformByLastOwner<Arc<ReadOnlyJoinMap>>>,
         offset_tracker: Arc<OffsetTracker>,
-        // global_buffer_initializer: Arc<AsyncInitializeOnce<Vec<AtomicCell<Option<LimitedRc<GlobalBuffer>>>>>>,
     ) -> Self {
         Self {
             instance_number,
@@ -290,7 +281,6 @@ impl SharedCompactor {
             state,
             build_join_map_when_last,
             offset_tracker,
-            // global_buffer_initializer,
         }
     }
 
@@ -370,18 +360,12 @@ impl SharedCompactor {
     ) -> Result<(), DataFusionError> {
         let combined_shard_contents = local_shard_contents.into_iter()
             .zip(shared_shard_contents.iter());
-        for (shard_number, (local_contents, shared_contents)) in combined_shard_contents.enumerate() {
+        for (local_contents, shared_contents) in combined_shard_contents {
             // Write the local contents to the shared vector at the index instance_number
             shared_contents[instance_number].store(local_contents);
-
-            // Attempt to consume the shared contents if all threads have finished writing to it
-            // if let Some(shared_contents) = LimitedRc::into_inner(shared_contents) {
-            //     shards_to_compact_sender.send((shard_number, shared_contents))
-            //         .map_err(|err| DataFusionError::Internal(format!("Failed to send contents of shard {} for compaction", err.0.0)))?
-            // }
         }
 
-        // Send shard contents to sender
+        // Send shard contents to sender if we are the last writer
         if let Some(owned_shard_contents) = LimitedRc::into_inner(shared_shard_contents) {
             // Build the global buffer
             let global_buffer = GlobalBuffer::new(offset_tracker.get().offset + 1);
@@ -429,56 +413,46 @@ impl SharedCompactor {
     fn compact_shard(
         shard_number: usize,
         all_shard_contents: Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>,
-        output_hash_lookup: &DashMap<u64, usize>,
+        output_hash_lookup: &SelfHashDashMap<usize>,
         global_buffer: &GlobalBuffer,
     ) {
         let entries = all_shard_contents.into_iter()
             .map(|cell| cell.take().into_iter().rev())
             .flatten()
             .collect::<Vec<_>>();
-        // let mut buffer = vec![(0, 0); entries.len() + 1];
-
         // Lock the shard in the output dashmap. We should be the only writer of this shard
-        let mut locked_shard = output_hash_lookup.shards()[shard_number].write();
+        let mut locked_shard = output_hash_lookup.shards()[shard_number].try_write()
+            .expect("Only one reader should ever hold a shard lock during compaction. This means there is a bug");
 
         // Write all the values in this group to the locked shard at once
         for entry in entries.into_iter() {
-            let global_index = entry.global_offset + entry.local_offset + 1;
-
+            let map_index = entry.offset + 1;
             if let Some(existing) = Self::insert_to_raw_table(
                 &mut locked_shard,
                 entry.hash,
-                entry.internal_hash,
-                global_index,
-                |k| output_hash_lookup.hasher().hash_one(k),
+                map_index,
             ) {
                 // If there was an existing index, we need to store it in the overflow buffer
                 // Safety: each global index is unique, so we are guaranteed to be the only writer
                 // to this particular memory address.
                 unsafe {
-                    global_buffer.set(global_index, existing);
+                    global_buffer.set(map_index, existing);
                 }
             }
         }
     }
 
-    fn insert_to_raw_table<K: Debug, V, F>(
-        raw_table: &mut hashbrown::raw::RawTable<(K, SharedValue<V>)>,
-        key: K,
-        key_hash: u64,
+    fn insert_to_raw_table<V>(
+        raw_table: &mut hashbrown::raw::RawTable<(u64, SharedValue<V>)>,
+        key: u64,
         value: V,
-        hash_function: F,
-    ) -> Option<V>
-        where
-            F: Fn(&K) -> u64,
-            K: PartialEq,
-    {
+    ) -> Option<V> {
         // This code is copied from the private methods of the hash map to write directly to
         // a raw table
         match raw_table.find_or_find_insert_slot(
-            key_hash,
+            key,
             |(k, _v)| k == &key,
-            |(k, _v)| hash_function(k),
+            |(k, _v)| *k,
         ) {
             // find_or_find_insert_slot returns Ok when an element already exists in that spot
             Ok(elem) => {
@@ -488,7 +462,7 @@ impl SharedCompactor {
             },
             // and it returns Err when the slot is empty
             Err(slot) => unsafe {
-                raw_table.insert_in_slot(key_hash, slot, (key, SharedValue::new(value)));
+                raw_table.insert_in_slot(key, slot, (key, SharedValue::new(value)));
                 None
             },
         }
@@ -496,20 +470,19 @@ impl SharedCompactor {
 }
 
 struct GlobalBuffer {
-    vec: UnsafeCell<Vec<usize>>
+    vec: UnsafeCellSendWrapper<Vec<usize>>
 }
 
 impl GlobalBuffer {
     pub fn new(size: usize) -> Self {
         Self {
-            vec: UnsafeCell::new(vec![0usize; size]),
+            vec: UnsafeCellSendWrapper::new(UnsafeCell::new(vec![0usize; size])),
         }
     }
 
     pub unsafe fn set(&self, index: usize, value: usize) {
         let vec = &mut *self.vec.get();
         vec[index] = value;
-        // self.vec[index].store(value, Ordering::Relaxed);
     }
 
     pub fn to_vec(self) -> Vec<usize> {
@@ -517,54 +490,32 @@ impl GlobalBuffer {
     }
 }
 
-// struct UnsafeCellSendWrapper<T> {
-//     cell: UnsafeCell<T>
-// }
-//
-// unsafe impl <T: Send> Send for UnsafeCellSendWrapper<T> {}
-// unsafe impl <T: Sync> Sync for UnsafeCellSendWrapper<T> {}
-//
-// impl <T> UnsafeCellSendWrapper<T> {
-//     pub fn new(cell: UnsafeCell<T>) -> Self {
-//         Self { cell }
-//     }
-// }
-//
-// impl <T> Deref for UnsafeCellSendWrapper<T> {
-//     type Target = UnsafeCell<T>;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.cell
-//     }
-// }
-
-type ReadOnlyJoinMap = ReadOnlyJoinMapT<u64>;
-
-// Copied from version 1
-#[derive(Clone)]
-pub struct ReadOnlyJoinMapT<K>
-    where K: Eq + Hash + Clone {
-    map: ReadOnlyView<K, usize>,
-    overflow: Vec<usize>,
+struct UnsafeCellSendWrapper<T> {
+    cell: UnsafeCell<T>
 }
 
-impl <T> ReadOnlyJoinMapT<T>
-    where T: Eq + Hash + Clone {
-    pub fn new(map: ReadOnlyView<T, usize>, overflow: Vec<usize>) -> Self {
-        Self { map, overflow }
+unsafe impl <T: Send> Send for UnsafeCellSendWrapper<T> {}
+unsafe impl <T: Sync> Sync for UnsafeCellSendWrapper<T> {}
+
+impl <T> UnsafeCellSendWrapper<T> {
+    pub fn new(cell: UnsafeCell<T>) -> Self {
+        Self { cell }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.cell.into_inner()
     }
 }
 
-impl <T> IndexLookup<T> for Arc<ReadOnlyJoinMapT<T>>
-    where T: Eq + Hash + Clone {
-    type It<'a> = ReadOnlyJoinMapIterator<'a>
-        where T: 'a;
+impl <T> Deref for UnsafeCellSendWrapper<T> {
+    type Target = UnsafeCell<T>;
 
-    fn get_iter<'a>(&'a self, key: &'a T) -> Self::It<'a> {
-        let starting_index = self.map.get(key).map(|index| *index).unwrap_or(0usize);
-        ReadOnlyJoinMapIterator::new(starting_index, &self.overflow)
+    fn deref(&self) -> &Self::Target {
+        &self.cell
     }
 }
+
+type ReadOnlyJoinMap = ReadOnlyJoinMapU;
 
 pub struct ReadOnlyJoinMapIterator<'a> {
     index: usize,
@@ -599,12 +550,12 @@ impl Iterator for ReadOnlyJoinMapIterator<'_> {
 // Copied from version 1
 #[derive(Clone)]
 pub struct ReadOnlyJoinMapU {
-    map: ReadOnlyView<u64, usize>,
+    map: SelfHashReadOnlyView<usize>,
     overflow: Vec<usize>,
 }
 
 impl ReadOnlyJoinMapU {
-    pub fn new(map: ReadOnlyView<u64, usize>, overflow: Vec<usize>) -> Self {
+    pub fn new(map: SelfHashReadOnlyView<usize>, overflow: Vec<usize>) -> Self {
         Self { map, overflow }
     }
 }
@@ -619,72 +570,8 @@ impl IndexLookup<u64> for Arc<ReadOnlyJoinMapU> {
 }
 
 
-// pub struct ReadOnlyJoinMap {
-//     hash_lookup: ReadOnlyView<u64, usize>,
-//     overflow_buffer: Vec<usize>,
-// }
-//
-// impl ReadOnlyJoinMap {
-//     pub fn new(
-//         hash_lookup: DashMap<u64, usize>,
-//         overflow_buffer: Vec<usize>,
-//     ) -> Self {
-//         Self {
-//             hash_lookup: hash_lookup.into_read_only(),
-//             overflow_buffer,
-//         }
-//     }
-// }
-//
-// impl IndexLookup<u64> for ReadOnlyJoinMap {
-//     type It<'a> = ReadOnlyJoinMapIterator<'a>
-//         where Self: 'a, u64: 'a;
-//
-//     fn get_iter<'a>(&'a self, hash: &'a u64) -> Self::It<'a> {
-//         let index = self.hash_lookup.get(hash).map(|index| *index).unwrap_or(0usize);
-//         ReadOnlyJoinMapIterator::new(index, &self.overflow_buffer)
-//     }
-// }
-//
-// impl IndexLookup<u64> for Arc<ReadOnlyJoinMap> {
-//     type It<'a> = ReadOnlyJoinMapIterator<'a>
-//         where Self: 'a, u64: 'a;
-//
-//     fn get_iter<'a>(&'a self, hash: &'a u64) -> Self::It<'a> {
-//         self.as_ref().get_iter(hash)
-//     }
-// }
-
-// pub struct ReadOnlyJoinMapIterator<'a> {
-//     global_index: usize,
-//     overflow: &'a [usize],
-// }
-//
-// impl <'a> ReadOnlyJoinMapIterator<'a> {
-//     fn new(global_index: usize, overflow: &'a [usize]) -> Self {
-//         Self {
-//             global_index,
-//             overflow
-//         }
-//     }
-// }
-//
-// impl Iterator for ReadOnlyJoinMapIterator<'_> {
-//     type Item = usize;
-//
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.global_index == 0 {
-//             return None;
-//         }
-//
-//         let output = self.global_index;
-//         self.global_index = self.overflow[self.global_index];
-//         Some(output - 1)
-//     }
-// }
-
 pub fn create_local_accumulators(count: usize) -> Vec<LocalAccumulator> {
-    let reference_map = DashMap::new();
+    let reference_map = DashMap::<u8, u8>::new();
     let shard_count = reference_map.shards().len();
 
     // Each instance needs a vector the length of the number of instances for each shard. We create
@@ -701,7 +588,7 @@ pub fn create_local_accumulators(count: usize) -> Vec<LocalAccumulator> {
     );
 
     let state = HashMapState {
-        hash_lookup: DashMap::new(),
+        hash_lookup: new_self_dash_map(),
         global_buffer: AsyncInitializeOnce::new(),
     };
 
@@ -723,7 +610,6 @@ pub fn create_local_accumulators(count: usize) -> Vec<LocalAccumulator> {
                 shard_count,
                 batch_list,
                 Arc::clone(&offset_tracker),
-                reference_map.clone(),
                 state,
                 SharedCompactorConstructor::new(
                     instance_number,
@@ -807,13 +693,13 @@ mod tests {
         let mut local_accumulators = create_local_accumulators(10);
         {
             let mut first_accumulator = local_accumulators.get_mut(0).unwrap();
-            first_accumulator.add_records(vec![], vec![1, 2, 3, 4], {
+            first_accumulator.add_records(vec![1, 2, 3, 4], {
                 RecordBatchBuilder::new()
                     .add("col1", vec![10, 20, 30, 40])
                     .build()
                     .unwrap()
             });
-            first_accumulator.add_records(vec![], vec![5, 6, 7, 8, 9], {
+            first_accumulator.add_records(vec![5, 6, 7, 8, 9], {
                 RecordBatchBuilder::new()
                     .add("col1", vec![50, 60, 70, 80, 90])
                     .build()
@@ -850,13 +736,13 @@ mod tests {
         let mut local_accumulators = create_local_accumulators(10);
         {
             let mut first_accumulator = local_accumulators.get_mut(0).unwrap();
-            first_accumulator.add_records(vec![], vec![1, 2, 3, 4], {
+            first_accumulator.add_records(vec![1, 2, 3, 4], {
                 RecordBatchBuilder::new()
                     .add("col1", vec![10, 20, 30, 40])
                     .build()
                     .unwrap()
             });
-            first_accumulator.add_records(vec![], vec![1, 5, 1, 6, 1], {
+            first_accumulator.add_records(vec![1, 5, 1, 6, 1], {
                 RecordBatchBuilder::new()
                     .add("col1", vec![10, 50, 10, 60, 10])
                     .build()
@@ -896,7 +782,7 @@ mod tests {
         let schema = Arc::new(Schema::empty());
         let mut local_accumulators = create_local_accumulators(10);
         for accumulator in local_accumulators.iter_mut() {
-            accumulator.add_records(vec![], vec![1, 2, 3, 4], {
+            accumulator.add_records(vec![1, 2, 3, 4], {
                 RecordBatchBuilder::new()
                     .add("col1", vec![10, 20, 30, 40])
                     .build()

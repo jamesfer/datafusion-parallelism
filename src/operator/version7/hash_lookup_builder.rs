@@ -1,11 +1,10 @@
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::future::Future;
-use std::hash::{BuildHasher, Hash, RandomState};
-use std::mem;
+use std::hash::{BuildHasher, Hash};
 use std::ops::Deref;
-use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crossbeam::atomic::AtomicCell;
 use crossbeam::utils::CachePadded;
@@ -439,7 +438,8 @@ impl SharedCompactor {
 
         // Write all the values in this group to the locked shard at once
         for entry in entries.into_iter() {
-            let global_index = entry.global_offset + entry.local_offset + 1;
+            // let global_index = entry.global_offset + entry.local_offset + 1;
+            let global_index = entry.global_offset + entry.local_offset;
 
             Self::append_to_raw_table(
                 &mut locked_shard,
@@ -629,6 +629,7 @@ impl IndexLookup<u64> for Arc<ReadOnlyJoinMapU> {
 
     fn get_iter<'a>(&'a self, key: &'a u64) -> Self::It<'a> {
         let starting_index = self.map.get(key).map(|index| *index).unwrap_or(0usize);
+        println!("Starting index: {}, key {}", starting_index, key);
         ReadOnlyJoinMapIterator::new(starting_index, &self.overflow)
     }
 }
@@ -900,10 +901,10 @@ mod tests {
         for (record_batch, read_only_map) in results.iter() {
             assert_eq!(record_batch.num_rows(), 9);
             assert_eq!(read_only_map.get_iter(&1).collect::<Vec<usize>>(), vec![
-                0usize,
-                4usize,
-                6usize,
                 8usize,
+                6usize,
+                4usize,
+                0usize,
             ]);
         }
     }
