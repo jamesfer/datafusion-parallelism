@@ -233,20 +233,19 @@ mod tests {
         assert_eq!(total_length, 0);
     }
 
-    // TODO left join not yet supported
-    // multi_tests! {
-    //     left_join,
-    //     left_join_none: None,
-    //     left_join_original: Some(JoinReplacement::Original),
-    //     left_join_new: Some(JoinReplacement::New),
-    //     left_join_new3: Some(JoinReplacement::New3),
-    //     left_join_new4: Some(JoinReplacement::New4),
-    //     left_join_new5: Some(JoinReplacement::New5),
-    //     left_join_new6: Some(JoinReplacement::New6),
-    //     left_join_new7: Some(JoinReplacement::New7),
-    //     left_join_new8: Some(JoinReplacement::New8),
-    //     left_join_new9: Some(JoinReplacement::New9),
-    // }
+    multi_tests! {
+        left_join,
+        left_join_none: None,
+        left_join_original: Some(JoinReplacement::Original),
+        left_join_new: Some(JoinReplacement::New),
+        left_join_new3: Some(JoinReplacement::New3),
+        left_join_new4: Some(JoinReplacement::New4),
+        left_join_new5: Some(JoinReplacement::New5),
+        left_join_new6: Some(JoinReplacement::New6),
+        left_join_new7: Some(JoinReplacement::New7),
+        left_join_new8: Some(JoinReplacement::New8),
+        left_join_new9: Some(JoinReplacement::New9),
+    }
 
     async fn left_join(rule: Option<JoinReplacement>) {
         let session_state = make_session_state_with_config(rule, None, true);
@@ -286,10 +285,138 @@ mod tests {
 
         assert_eq!(sorted, make_record_batch(
             vec![
-                ("id", DataType::Int32, Arc::new(make_int_array(vec![1, 1, 2].into_iter()))),
-                ("value", DataType::Utf8, Arc::new(make_string_array(vec!["left".to_string(), "left".to_string(), "left".to_string()]))),
-                ("id", DataType::Int32, Arc::new(make_int_array(vec![Some(1), Some(1), None].into_iter()))),
-                ("value", DataType::Utf8, Arc::new(make_string_array_nullable(vec![Some("right".to_string()), Some("right".to_string()), None]))),
+                ("id", DataType::Int32, Arc::new(make_int_array(vec![None, Some(1), Some(1), Some(2)].into_iter()))),
+                ("value", DataType::Utf8, Arc::new(make_string_array(vec!["left".to_string(), "left".to_string(), "left".to_string(), "left".to_string()]))),
+                ("id", DataType::Int32, Arc::new(make_int_array(vec![None, Some(1), Some(1), None].into_iter()))),
+                ("value", DataType::Utf8, Arc::new(make_string_array_nullable(vec![None, Some("right".to_string()), Some("right".to_string()), None]))),
+            ],
+        ));
+    }
+
+    multi_tests! {
+        left_semi_join,
+        left_semi_join_none: None,
+        left_semi_join_original: Some(JoinReplacement::Original),
+        left_semi_join_new: Some(JoinReplacement::New),
+        left_semi_join_new3: Some(JoinReplacement::New3),
+        left_semi_join_new4: Some(JoinReplacement::New4),
+        left_semi_join_new5: Some(JoinReplacement::New5),
+        left_semi_join_new6: Some(JoinReplacement::New6),
+        left_semi_join_new7: Some(JoinReplacement::New7),
+        left_semi_join_new8: Some(JoinReplacement::New8),
+        left_semi_join_new9: Some(JoinReplacement::New9),
+    }
+
+    async fn left_semi_join(rule: Option<JoinReplacement>) {
+        let session_state = make_session_state_with_config(rule.clone(), None, true);
+        let schema = Arc::new(MemorySchemaProvider::new());
+
+        schema.register_table("left".to_string(), Arc::new(make_table(
+            1,
+            vec![
+                ("id", DataType::Int32, Box::new(|i| Arc::new(make_int_array(vec![Some(1), Some(2), None].into_iter())))),
+                ("value", DataType::Utf8, Box::new(|_| Arc::new(make_string_constant_array("left".to_string(), 3)))),
+            ],
+        ))).unwrap();
+        schema.register_table("right".to_string(), Arc::new(make_table(
+            1,
+            vec![
+                ("id", DataType::Int32, Box::new(|i| Arc::new(make_int_array(vec![Some(1), Some(1), None].into_iter())))),
+                ("value", DataType::Utf8, Box::new(|_| Arc::new(make_string_constant_array("right".to_string(), 3)))),
+            ],
+        ))).unwrap();
+
+        make_catalog_from_schema(&session_state, schema);
+
+        let plan = parse_sql(
+            "SELECT * \
+            FROM my_catalog.my_schema.left \
+            WHERE EXISTS ( \
+                SELECT * FROM my_catalog.my_schema.right \
+                WHERE left.id = right.id \
+            )",
+            &session_state,
+        ).await
+            .unwrap();
+
+        // Assert that the plan is actually using a left semi join
+        let join_type = get_join_type(&rule, &plan);
+        assert_eq!(join_type, Some(&JoinType::LeftSemi), "plan must use left semi join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
+
+        let results = collect(plan, Arc::new(TaskContext::default())).await.unwrap();
+        let single_result = concat_batches(&results[0].schema(), results.iter()).unwrap();
+        let indices = sort_to_indices(single_result.column(0), None, None).unwrap();
+        let columns = single_result.columns().iter().map(|c| take(&*c, &indices, None).unwrap()).collect();
+        let sorted = RecordBatch::try_new(single_result.schema(), columns).unwrap();
+
+        assert_eq!(sorted, make_record_batch(
+            vec![
+                ("id", DataType::Int32, Arc::new(make_int_array(vec![1].into_iter()))),
+                ("value", DataType::Utf8, Arc::new(make_string_array(vec!["left".to_string()]))),
+            ],
+        ));
+    }
+
+    multi_tests! {
+        left_anti_join,
+        left_anti_join_none: None,
+        left_anti_join_original: Some(JoinReplacement::Original),
+        left_anti_join_new: Some(JoinReplacement::New),
+        left_anti_join_new3: Some(JoinReplacement::New3),
+        left_anti_join_new4: Some(JoinReplacement::New4),
+        left_anti_join_new5: Some(JoinReplacement::New5),
+        left_anti_join_new6: Some(JoinReplacement::New6),
+        left_anti_join_new7: Some(JoinReplacement::New7),
+        left_anti_join_new8: Some(JoinReplacement::New8),
+        left_anti_join_new9: Some(JoinReplacement::New9),
+    }
+
+    async fn left_anti_join(rule: Option<JoinReplacement>) {
+        let session_state = make_session_state_with_config(rule.clone(), None, true);
+        let schema = Arc::new(MemorySchemaProvider::new());
+
+        schema.register_table("left".to_string(), Arc::new(make_table(
+            1,
+            vec![
+                ("id", DataType::Int32, Box::new(|i| Arc::new(make_int_array(vec![Some(1), Some(2), None].into_iter())))),
+                ("value", DataType::Utf8, Box::new(|_| Arc::new(make_string_constant_array("left".to_string(), 3)))),
+            ],
+        ))).unwrap();
+        schema.register_table("right".to_string(), Arc::new(make_table(
+            1,
+            vec![
+                ("id", DataType::Int32, Box::new(|i| Arc::new(make_int_array(vec![Some(1), Some(1), None].into_iter())))),
+                ("value", DataType::Utf8, Box::new(|_| Arc::new(make_string_constant_array("right".to_string(), 3)))),
+            ],
+        ))).unwrap();
+
+        make_catalog_from_schema(&session_state, schema);
+
+        let plan = parse_sql(
+            "SELECT * \
+            FROM my_catalog.my_schema.left \
+            WHERE NOT EXISTS ( \
+                SELECT * FROM my_catalog.my_schema.right \
+                WHERE left.id = right.id \
+            )",
+            &session_state,
+        ).await
+            .unwrap();
+
+        // Assert that the plan is actually using a left semi join
+        let join_type = get_join_type(&rule, &plan);
+        assert_eq!(join_type, Some(&JoinType::LeftAnti), "plan must use left anti join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
+
+        let results = collect(plan, Arc::new(TaskContext::default())).await.unwrap();
+        let single_result = concat_batches(&results[0].schema(), results.iter()).unwrap();
+        let indices = sort_to_indices(single_result.column(0), None, None).unwrap();
+        let columns = single_result.columns().iter().map(|c| take(&*c, &indices, None).unwrap()).collect();
+        let sorted = RecordBatch::try_new(single_result.schema(), columns).unwrap();
+
+        assert_eq!(sorted, make_record_batch(
+            vec![
+                ("id", DataType::Int32, Arc::new(make_int_array(vec![None, Some(2)]))),
+                ("value", DataType::Utf8, Arc::new(make_string_array(vec!["left".to_string(), "left".to_string()]))),
             ],
         ));
     }

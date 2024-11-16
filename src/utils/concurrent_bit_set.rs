@@ -90,6 +90,21 @@ impl ConcurrentBitSet {
         BooleanArray::from(BooleanBufferBuilder::new_from_buffer(mutable_buffer, self.length).finish())
     }
 
+    pub fn get_set_indices_array(&self) -> UInt32Array {
+        let mut array = UInt32Builder::with_capacity(self.length - self.get_set_count());
+
+        for (atomic64, offset) in self.contents.iter().zip((0..self.length).step_by(64)) {
+            let bits = atomic64.load(Ordering::Relaxed);
+            for i in 0..min(64, self.length - offset) {
+                if bits & (1u64 << i) == 1 {
+                    array.append_value((offset + i) as u32);
+                }
+            }
+        }
+
+        array.finish()
+    }
+
     pub fn get_unset_indices(&self) -> BooleanArray {
         // Create a buffer large enough to fit every whole u64, so larger than self.length
         let mut mutable_buffer = MutableBuffer::with_capacity(self.contents.len() * 64);
