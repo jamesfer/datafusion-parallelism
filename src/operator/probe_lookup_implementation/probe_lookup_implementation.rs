@@ -4,7 +4,7 @@ use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion_common::{DataFusionError, JoinType};
 use datafusion_physical_expr::PhysicalExprRef;
-use datafusion_physical_plan::joins::utils::build_join_schema;
+use datafusion_physical_plan::joins::utils::{build_join_schema, JoinFilter};
 use crate::operator::probe_lookup_implementation::full::FullJoinProbeLookupStream;
 use crate::operator::probe_lookup_implementation::inner::InnerJoinProbeLookupStream;
 use crate::operator::probe_lookup_implementation::left_anti::LeftAntiProbeLookupStream;
@@ -97,8 +97,10 @@ impl ProbeLookupStreamImplementation {
         &self,
         output_schema: SchemaRef,
         probe_stream: SendableRecordBatchStream,
+        probe_id: Option<usize>,
         probe_expressions: Vec<PhysicalExprRef>,
         build_expressions: Vec<PhysicalExprRef>,
+        filter: Option<JoinFilter>,
         build_side_records: RecordBatch,
         read_only_join_map: Lookup,
     ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
@@ -109,6 +111,7 @@ impl ProbeLookupStreamImplementation {
                 probe_stream,
                 probe_expressions,
                 build_expressions,
+                filter,
                 build_side_records,
                 read_only_join_map,
             ),
@@ -117,6 +120,7 @@ impl ProbeLookupStreamImplementation {
                 probe_stream,
                 probe_expressions,
                 build_expressions,
+                filter,
                 build_side_records,
                 read_only_join_map,
             ),
@@ -125,6 +129,7 @@ impl ProbeLookupStreamImplementation {
                 probe_stream,
                 probe_expressions,
                 build_expressions,
+                filter,
                 build_side_records,
                 read_only_join_map,
             ),
@@ -133,6 +138,7 @@ impl ProbeLookupStreamImplementation {
                 probe_stream,
                 probe_expressions,
                 build_expressions,
+                filter,
                 build_side_records,
                 read_only_join_map,
             ),
@@ -141,6 +147,7 @@ impl ProbeLookupStreamImplementation {
                 probe_stream,
                 probe_expressions,
                 build_expressions,
+                filter,
                 build_side_records,
                 read_only_join_map,
             ),
@@ -149,6 +156,7 @@ impl ProbeLookupStreamImplementation {
                 probe_stream,
                 probe_expressions,
                 build_expressions,
+                filter,
                 build_side_records,
                 read_only_join_map,
             ),
@@ -157,6 +165,7 @@ impl ProbeLookupStreamImplementation {
                 probe_stream,
                 probe_expressions,
                 build_expressions,
+                filter,
                 build_side_records,
                 read_only_join_map,
             ),
@@ -165,6 +174,7 @@ impl ProbeLookupStreamImplementation {
                 probe_stream,
                 probe_expressions,
                 build_expressions,
+                filter,
                 build_side_records,
                 read_only_join_map,
             ),

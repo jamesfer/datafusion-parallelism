@@ -22,6 +22,7 @@ mod tests {
     use datafusion_common::{ColumnStatistics, DataFusionError, JoinType, Statistics};
     use datafusion_common::stats::Precision;
     use datafusion_physical_plan::{collect, displayable, ExecutionPlan};
+    use datafusion_physical_plan::coalesce_batches::CoalesceBatchesExec;
     use datafusion_physical_plan::joins::HashJoinExec;
     use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
     use datafusion_physical_plan::streaming::PartitionStream;
@@ -341,7 +342,7 @@ mod tests {
 
         // Assert that the plan is actually using a left semi join
         let join_type = get_join_type(&rule, &plan);
-        assert_eq!(join_type, Some(&JoinType::LeftSemi), "plan must use left semi join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
+        assert_eq!(join_type, Some(JoinType::LeftSemi), "plan must use left semi join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
 
         let results = collect(plan, Arc::new(TaskContext::default())).await.unwrap();
         let single_result = concat_batches(&results[0].schema(), results.iter()).unwrap();
@@ -405,7 +406,7 @@ mod tests {
 
         // Assert that the plan is actually using a left semi join
         let join_type = get_join_type(&rule, &plan);
-        assert_eq!(join_type, Some(&JoinType::LeftAnti), "plan must use left anti join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
+        assert_eq!(join_type, Some(JoinType::LeftAnti), "plan must use left anti join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
 
         let results = collect(plan, Arc::new(TaskContext::default())).await.unwrap();
         let single_result = concat_batches(&results[0].schema(), results.iter()).unwrap();
@@ -468,7 +469,7 @@ mod tests {
 
         // Assert that the plan is actually using a right join
         let join_type = get_join_type(&rule, &plan);
-        assert_eq!(join_type, Some(&JoinType::Right), "plan must use right anti join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
+        assert_eq!(join_type, Some(JoinType::Right), "plan must use right anti join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
 
         let results = collect_and_sort_results(plan, 2).await.unwrap();
         assert_eq!(results, make_record_batch(
@@ -545,7 +546,7 @@ mod tests {
 
         // Assert that the plan is actually using a right anti join
         let join_type = get_join_type(&rule, &plan);
-        assert_eq!(join_type, Some(&JoinType::RightAnti), "plan must use right anti join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
+        assert_eq!(join_type, Some(JoinType::RightAnti), "plan must use right anti join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
 
         let results = collect_and_sort_results(plan, 0).await.unwrap();
         assert_eq!(results, make_record_batch(
@@ -602,7 +603,7 @@ mod tests {
 
         // Assert that the plan is actually using a full join
         let join_type = get_join_type(&rule, &plan);
-        assert_eq!(join_type, Some(&JoinType::Full), "plan must use full join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
+        assert_eq!(join_type, Some(JoinType::Full), "plan must use full join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
 
         let results = collect_and_order_results(plan, vec![0, 2]).await.unwrap();
         assert_eq!(results, make_record_batch(
@@ -615,107 +616,121 @@ mod tests {
         ));
     }
 
-    // multi_tests! {
-    //     full_join_with_filter,
-    //     full_join_with_filter_none: None,
-    //     full_join_with_filter_original: Some(JoinReplacement::Original),
-    //     full_join_with_filter_new: Some(JoinReplacement::New),
-    //     full_join_with_filter_new3: Some(JoinReplacement::New3),
-    //     full_join_with_filter_new4: Some(JoinReplacement::New4),
-    //     full_join_with_filter_new5: Some(JoinReplacement::New5),
-    //     full_join_with_filter_new6: Some(JoinReplacement::New6),
-    //     full_join_with_filter_new7: Some(JoinReplacement::New7),
-    //     full_join_with_filter_new8: Some(JoinReplacement::New8),
-    //     full_join_with_filter_new9: Some(JoinReplacement::New9),
-    // }
-    //
-    // async fn full_join_with_filter(rule: Option<JoinReplacement>) {
-    //     let session_state = make_session_state_with_config(rule.clone(), None, true);
-    //     let schema = Arc::new(MemorySchemaProvider::new());
-    //
-    //     schema.register_table("left".to_string(), Arc::new(make_table(
-    //         1,
-    //         vec![
-    //             ("id", DataType::Int32, Box::new(|i| Arc::new(make_int_array(vec![Some(1), Some(2), Some(3), None].into_iter())))),
-    //             ("value", DataType::Utf8, Box::new(|_| Arc::new(make_string_array(vec!["left".to_string(), "left".to_string(), "same".to_string(), "left".to_string()])))),
-    //         ],
-    //     ))).unwrap();
-    //     schema.register_table("right".to_string(), Arc::new(make_table(
-    //         1,
-    //         vec![
-    //             ("id", DataType::Int32, Box::new(|i| Arc::new(make_int_array(vec![Some(2), Some(3), Some(4), None].into_iter())))),
-    //             ("value", DataType::Utf8, Box::new(|_| Arc::new(make_string_array(vec!["right".to_string(), "same".to_string(), "right".to_string(), "right".to_string()])))),
-    //         ],
-    //     ))).unwrap();
-    //
-    //     make_catalog_from_schema(&session_state, schema);
-    //
-    //     let plan = parse_sql(
-    //         "SELECT left.id, right.id \
-    //         FROM my_catalog.my_schema.left \
-    //         FULL JOIN my_catalog.my_schema.right \
-    //           ON left.id = right.id \
-    //         WHERE left.value != right.value",
-    //         &session_state,
-    //     ).await
-    //         .unwrap();
-    //
-    //     // Assert that the plan is actually using a full join
-    //     let join_type = get_join_type(&rule, &plan);
-    //     assert_eq!(join_type, Some(&JoinType::Full), "plan must use full join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
-    //
-    //     let results = collect_and_order_results(plan, vec![0, 2]).await.unwrap();
-    //     assert_eq!(results, make_record_batch(
-    //         vec![
-    //             ("id", DataType::Int32, Arc::new(make_int_array(vec![
-    //                 Some(1),
-    //                 Some(2),
-    //                 Some(3),
-    //                 None,
-    //                 None,
-    //                 None,
-    //                 None,
-    //             ]))),
-    //             ("value", DataType::Utf8, Arc::new(make_string_array_nullable(vec![
-    //                 Some("left".to_string()),
-    //                 Some("left".to_string()),
-    //                 Some("same".to_string()),
-    //                 None,
-    //                 None,
-    //                 None,
-    //                 Some("left".to_string()),
-    //             ]))),
-    //             ("id", DataType::Int32, Arc::new(make_int_array(vec![
-    //                 None,
-    //                 None,
-    //                 Some(3),
-    //                 Some(2),
-    //                 Some(4),
-    //                 None,
-    //                 None,
-    //             ].into_iter()))),
-    //             ("value", DataType::Utf8, Arc::new(make_string_array_nullable(vec![
-    //                 None,
-    //                 None,
-    //                 Some("same".to_string()),
-    //                 Some("right".to_string()),
-    //                 Some("right".to_string()),
-    //                 None,
-    //             ]))),
-    //         ],
-    //     ));
-    // }
+    multi_tests! {
+        full_join_with_filter,
+        full_join_with_filter_none: None,
+        full_join_with_filter_original: Some(JoinReplacement::Original),
+        full_join_with_filter_new: Some(JoinReplacement::New),
+        full_join_with_filter_new3: Some(JoinReplacement::New3),
+        full_join_with_filter_new4: Some(JoinReplacement::New4),
+        full_join_with_filter_new5: Some(JoinReplacement::New5),
+        full_join_with_filter_new6: Some(JoinReplacement::New6),
+        full_join_with_filter_new7: Some(JoinReplacement::New7),
+        full_join_with_filter_new8: Some(JoinReplacement::New8),
+        full_join_with_filter_new9: Some(JoinReplacement::New9),
+    }
 
-    fn get_join_type<'a>(rule: &Option<JoinReplacement>, plan: &'a Arc<dyn ExecutionPlan>) -> Option<&'a JoinType> {
+    async fn full_join_with_filter(rule: Option<JoinReplacement>) {
+        let session_state = make_session_state_with_config(rule.clone(), None, true);
+        let schema = Arc::new(MemorySchemaProvider::new());
+
+        schema.register_table("left".to_string(), Arc::new(make_table(
+            1,
+            vec![
+                ("id", DataType::Int32, Box::new(|i| Arc::new(make_int_array(vec![Some(1), Some(2), Some(3), None].into_iter())))),
+                ("value", DataType::Utf8, Box::new(|_| Arc::new(make_string_array(vec!["left".to_string(), "left".to_string(), "same".to_string(), "left".to_string()])))),
+            ],
+        ))).unwrap();
+        schema.register_table("right".to_string(), Arc::new(make_table(
+            1,
+            vec![
+                ("id", DataType::Int32, Box::new(|i| Arc::new(make_int_array(vec![Some(2), Some(3), Some(4), None].into_iter())))),
+                ("value", DataType::Utf8, Box::new(|_| Arc::new(make_string_array(vec!["right".to_string(), "same".to_string(), "right".to_string(), "right".to_string()])))),
+            ],
+        ))).unwrap();
+
+        make_catalog_from_schema(&session_state, schema);
+
+        let plan = parse_sql(
+            "SELECT * \
+            FROM my_catalog.my_schema.left \
+            FULL JOIN my_catalog.my_schema.right \
+              ON left.id = right.id AND left.value != right.value",
+            &session_state,
+        ).await
+            .unwrap();
+
+        // Assert that the plan is actually using a full join
+        let join_type = get_join_type(&rule, &plan);
+        assert_eq!(join_type, Some(JoinType::Full), "plan must use full join for test to be valid: {}", displayable(plan.as_ref()).indent(true));
+
+        let results = collect_and_order_results(plan, vec![0, 2]).await.unwrap();
+        assert_eq!(results, make_record_batch(
+            vec![
+                ("id", DataType::Int32, Arc::new(make_int_array(vec![
+                    Some(1),
+                    Some(2),
+                    Some(3),
+                    None,
+                    None,
+                    None,
+                    None,
+                ]))),
+                ("value", DataType::Utf8, Arc::new(make_string_array_nullable(vec![
+                    Some("left".to_string()),
+                    Some("left".to_string()),
+                    Some("same".to_string()),
+                    None,
+                    None,
+                    None,
+                    Some("left".to_string()),
+                ]))),
+                ("id", DataType::Int32, Arc::new(make_int_array(vec![
+                    None,
+                    Some(2),
+                    None,
+                    Some(3),
+                    Some(4),
+                    None,
+                    None,
+                ].into_iter()))),
+                ("value", DataType::Utf8, Arc::new(make_string_array_nullable(vec![
+                    None,
+                    Some("right".to_string()),
+                    None,
+                    Some("same".to_string()),
+                    Some("right".to_string()),
+                    Some("right".to_string()),
+                    None,
+                ]))),
+            ],
+        ));
+    }
+
+    fn get_join_type<'a>(rule: &Option<JoinReplacement>, plan: &'a Arc<dyn ExecutionPlan>) -> Option<JoinType> {
         if rule.is_none() {
             // Root node is a CoalesceBatchesExec
             plan.children()
                 .first()
                 .map(|child| child.as_any().downcast_ref::<HashJoinExec>())
                 .flatten()
-                .map(|hash_join| hash_join.join_type())
+                .map(|hash_join| hash_join.join_type().clone())
         } else {
-            plan.as_any().downcast_ref::<ParallelHashJoin>().map(|parallel_join| parallel_join.join_type())
+            // Try the top child, or the first child if it is a coalesce batches
+            let any_plan = plan.as_any();
+            any_plan.downcast_ref::<ParallelHashJoin>()
+                .map(|parallel_join| parallel_join.join_type().clone())
+                .or_else(|| any_plan.downcast_ref::<CoalesceBatchesExec>()
+                    .and_then(|coalesce_batches| {
+                        match coalesce_batches.children().first() {
+                            None => None,
+                            Some(child) => match child.as_any().downcast_ref::<ParallelHashJoin>() {
+                                None => None,
+                                Some(parallel_join) => Some(parallel_join.join_type().clone()),
+                            }
+                        }
+                    })
+                )
         }
     }
 

@@ -13,13 +13,14 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use datafusion::error::DataFusionError;
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::physical_optimizer::optimizer::PhysicalOptimizer;
 use structopt::clap::arg_enum;
 use structopt::StructOpt;
 use tokio::time::Instant;
 use datafusion_parallelism::operator::use_parallel_hash_join_rule::UseParallelHashJoinRule;
+use datafusion_parallelism::utils::static_table::StaticTable;
 
 arg_enum! {
     #[derive(Debug)]
@@ -98,6 +99,12 @@ struct Opt {
     #[structopt(long, possible_values = &JoinReplacement::variants(), case_insensitive=true)]
     new_join_replacement: Option<JoinReplacement>,
 
+    /// Load all parquet data into memory before running queries
+    #[structopt(long)]
+    from_memory: bool,
+    #[structopt(long)]
+    memory_partitions: Option<usize>,
+
     /// Print query plan
     #[structopt(long)]
     print_plan: bool,
@@ -130,7 +137,7 @@ impl Results {
     }
 }
 
-#[tokio::main]
+#[tokio::main(worker_threads = 8)]
 pub async fn main() -> Result<()> {
     let mut results = Results::new();
     for arg in std::env::args() {
@@ -189,9 +196,13 @@ pub async fn main() -> Result<()> {
         if path.ends_with(".parquet") {
             let filename = Path::file_name(&file_path).unwrap().to_str().unwrap();
             let table_name = &filename[0..filename.len() - 8];
-            println!("Registering table {} as {}", table_name, path);
-            ctx.register_parquet(&table_name, &path, ParquetReadOptions::default())
-                .await?;
+            if opt.from_memory {
+                register_in_memory_table(&ctx, table_name, &path, opt.memory_partitions.unwrap_or(1)).await?;
+            } else {
+                println!("Registering table {} as {}", table_name, path);
+                ctx.register_parquet(table_name, &path, ParquetReadOptions::default())
+                    .await?;
+            }
         }
     }
 
@@ -352,5 +363,29 @@ pub async fn execute_query(
         durations.push(total_duration_millis);
     }
     results.query_times.push((query_no, durations));
+    Ok(())
+}
+
+async fn register_in_memory_table(ctx: &SessionContext, table_name: &str, path: &String, partitions: usize) -> Result<(), DataFusionError> {
+    // Register the parquet table with a different suffix
+    // let parquet_table_name = table_name.to_string() + "_parquet";
+    // ctx.register_parquet(&parquet_table_name, path, ParquetReadOptions::default())
+    //     .await?;
+
+    // Read the parquet data into memory
+    let df = ctx.read_parquet(path, ParquetReadOptions::default()).await?;
+    let schema = df.schema().inner().clone();
+    let batches = df.collect().await?;
+
+    // let table_provider = ctx.table_provider(TableReference::bare(parquet_table_name)).await?;
+    // let table = MemTable::load(table_provider, Some(partitions), &ctx.state()).await?;
+
+    // Register the table in memory
+    let rows = batches.iter().map(|b| b.num_rows()).sum::<usize>();
+    let size = batches.iter().map(|b| b.get_array_memory_size()).sum::<usize>();
+    println!("Registering table {} in memory from {} (batches {}, rows {}, size {})", table_name, path, batches.len(), rows, size);
+    let table = StaticTable::new_with_parallelism(schema, batches, partitions);
+    ctx.register_table(table_name, Arc::new(table))?;
+
     Ok(())
 }

@@ -1,4 +1,4 @@
-use crate::shared::datafusion_private::{equal_rows_arr, get_semi_indices};
+use crate::shared::datafusion_private::{apply_join_filter_to_indices, equal_rows_arr, get_semi_indices};
 use crate::shared::shared::{calculate_hash, evaluate_expressions, get_matching_indices, ProbeBuildIndices};
 use crate::utils::index_lookup::IndexLookup;
 use crate::utils::plain_record_batch_stream::{PlainRecordBatchStream, SendablePlainRecordBatchStream};
@@ -7,8 +7,9 @@ use datafusion::arrow::array::{ArrayRef, RecordBatch};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::error::ArrowError;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion_common::DataFusionError;
+use datafusion_common::{DataFusionError, JoinSide};
 use datafusion_physical_expr::PhysicalExprRef;
+use datafusion_physical_plan::joins::utils::JoinFilter;
 use futures::stream::StreamExt;
 
 // Right side is the probe side
@@ -28,6 +29,7 @@ impl RightSemiProbeLookupStream {
         probe_stream: SendableRecordBatchStream,
         probe_expressions: Vec<PhysicalExprRef>,
         build_expressions: Vec<PhysicalExprRef>,
+        filter: Option<JoinFilter>,
         build_side_records: RecordBatch,
         read_only_join_map: Lookup
     ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
@@ -37,6 +39,7 @@ impl RightSemiProbeLookupStream {
             probe_stream,
             probe_expressions,
             build_expressions,
+            filter,
             build_side_records,
             read_only_join_map,
         )))
@@ -48,6 +51,7 @@ fn right_semi_join_streaming_lookup<Lookup>(
     probe_stream: SendableRecordBatchStream,
     probe_expressions: Vec<PhysicalExprRef>,
     build_expressions: Vec<PhysicalExprRef>,
+    filter: Option<JoinFilter>,
     build_side_records: RecordBatch,
     read_only_join_map: Lookup,
 ) -> impl PlainRecordBatchStream
@@ -59,6 +63,7 @@ fn right_semi_join_streaming_lookup<Lookup>(
                 &output_schema,
                 &probe_expressions,
                 &build_expressions,
+                &filter,
                 &build_side_records,
                 &read_only_join_map,
                 &result_probe_batch?,
@@ -70,6 +75,7 @@ fn lookup_right_semi_join_probe_batch<Lookup>(
     output_schema: &SchemaRef,
     probe_expressions: &Vec<PhysicalExprRef>,
     build_expressions: &Vec<PhysicalExprRef>,
+    filter: &Option<JoinFilter>,
     build_side_records: &RecordBatch,
     read_only_join_map: &Lookup,
     probe_batch: &RecordBatch
@@ -95,6 +101,20 @@ where
         // TODO support null_equals_null parameter
         false,
     )?;
+
+    // Apply join filter if exists
+    let (build_indices, probe_indices) = if let Some(filter) = &filter {
+        apply_join_filter_to_indices(
+            build_side_records,
+            probe_batch,
+            build_indices,
+            probe_indices,
+            filter,
+            JoinSide::Left,
+        )?
+    } else {
+        (build_indices, probe_indices)
+    };
 
     // Semi joins only use the unique probe indices
     let probe_indices = get_semi_indices(0usize..probe_batch.num_rows(), &probe_indices);

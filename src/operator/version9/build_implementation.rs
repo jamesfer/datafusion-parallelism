@@ -135,6 +135,9 @@ async fn compact_join_map(
             sender.send(output_batch.clone())
                 .map_err(|err| DataFusionError::Internal("Send error".to_string()))?;
 
+
+            println!("Version9 hash map build finished. Lookup size: {}", read_only_join_map.len());
+
             output_batch
         }
         None => {

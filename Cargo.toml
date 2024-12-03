@@ -24,6 +24,7 @@ name = "lookup_speed"
 harness = false
 
 [dependencies]
+async-std = "1.13.0"
 datafusion = "40.0.0"
 datafusion-common = "40.0.0"
 datafusion-physical-expr = "40.0.0"

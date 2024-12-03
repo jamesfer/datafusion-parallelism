@@ -1,15 +1,16 @@
 use std::any::Any;
 use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, OnceLock};
-
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_common::JoinType;
 use datafusion_physical_expr::{Distribution, EquivalenceProperties, Partitioning, PhysicalExprRef};
 use datafusion_physical_plan::joins::{HashJoinExec, PartitionMode};
 use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties};
-
+use datafusion_physical_plan::joins::utils::{build_join_schema, JoinFilter};
 use crate::operator::parallel_hash_join_executor::ParallelHashJoinExecutor;
 use crate::operator::probe_lookup_implementation::probe_lookup_implementation::ProbeLookupStreamImplementation;
+use crate::operator::work_stealing_repartition_exec::WorkStealingRepartitionExec;
 use crate::parse_sql::JoinReplacement;
 
 #[derive(Debug)]
@@ -19,25 +20,28 @@ pub struct ParallelHashJoin {
     right: Arc<dyn ExecutionPlan>,
     on: Vec<(PhysicalExprRef, PhysicalExprRef)>,
     join_type: JoinType,
+    filter: Option<JoinFilter>,
     build_implementation_version: JoinReplacement,
     executor_instance: Arc<OnceLock<ParallelHashJoinExecutor>>,
 }
 
 impl ParallelHashJoin {
     pub fn new(
-        properties: PlanProperties,
         left: Arc<dyn ExecutionPlan>,
         right: Arc<dyn ExecutionPlan>,
         on: Vec<(PhysicalExprRef, PhysicalExprRef)>,
         join_type: JoinType,
+        filter: Option<JoinFilter>,
         build_implementation_version: JoinReplacement,
     ) -> Self {
+        let (schema, _) = build_join_schema(&left.schema(), &right.schema(), &join_type);
         Self {
-            properties,
+            properties: Self::compute_properties(Arc::new(schema), &left),
             left,
             right,
             on,
             join_type,
+            filter,
             build_implementation_version,
             executor_instance: Arc::new(OnceLock::new()),
         }
@@ -78,9 +82,9 @@ impl ParallelHashJoin {
         &self.join_type
     }
 
-    pub fn compute_properties(eq: EquivalenceProperties, left: &Arc<dyn ExecutionPlan>) -> PlanProperties {
+    pub fn compute_properties(schema: SchemaRef, left: &Arc<dyn ExecutionPlan>) -> PlanProperties {
         PlanProperties::new(
-            eq,
+            EquivalenceProperties::new(schema),
             Partitioning::RoundRobinBatch(left.output_partitioning().partition_count()),
             ExecutionMode::Bounded,
         )
@@ -121,11 +125,12 @@ impl ExecutionPlan for ParallelHashJoin {
     fn with_new_children(self: Arc<Self>, children: Vec<Arc<dyn ExecutionPlan>>) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
         let left = Arc::clone(&children[0]);
         Ok(Arc::new(ParallelHashJoin {
-            properties: ParallelHashJoin::compute_properties(self.properties.eq_properties.clone(), &left),
+            properties: ParallelHashJoin::compute_properties(self.schema().clone(), &left),
             left,
             right: Arc::clone(&children[1]),
-            join_type: self.join_type.clone(),
             on: self.on.clone(),
+            join_type: self.join_type.clone(),
+            filter: self.filter.clone(),
             build_implementation_version: self.build_implementation_version.clone(),
             // TODO this might break the data fusion contract
             executor_instance: self.executor_instance.clone(),
@@ -146,6 +151,7 @@ impl ExecutionPlan for ParallelHashJoin {
 
         // Convert each side of the join into a stream to consume
         let left_stream = self.left.execute(partition, Arc::clone(&context))?;
+        let right_id = self.right.as_any().downcast_ref::<WorkStealingRepartitionExec>().map(|w| w.id());
         let right_stream = self.right.execute(partition, context)?;
 
         // In DataFusion, the left stream is the build side
@@ -153,7 +159,9 @@ impl ExecutionPlan for ParallelHashJoin {
             partition,
             left_stream,
             right_stream,
+            right_id,
             self.on.clone(),
+            self.filter.clone(),
         ))
     }
 }

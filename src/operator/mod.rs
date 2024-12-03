@@ -13,3 +13,5 @@ mod version7;
 mod version8;
 pub mod lookup_consumers;
 mod version9;
+mod work_stealing_repartition_exec;
+pub mod use_work_stealing_repartition_rule;

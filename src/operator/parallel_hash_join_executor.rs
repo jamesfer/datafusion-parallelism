@@ -7,6 +7,7 @@ use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion_common::{DataFusionError, JoinType};
 use datafusion_physical_expr::PhysicalExprRef;
+use datafusion_physical_plan::joins::utils::JoinFilter;
 use crate::operator::build_implementation::BuildImplementation;
 use crate::operator::lookup_consumers::IndexLookupConsumer;
 
@@ -19,20 +20,24 @@ use crate::utils::plain_record_batch_stream::PlainRecordBatchStream;
 struct PerformProbeLookup {
     output_schema: SchemaRef,
     probe_stream: SendableRecordBatchStream,
+    probe_id: Option<usize>,
     probe_expressions: Vec<PhysicalExprRef>,
     probe_stream_lookup: Arc<ProbeLookupStreamImplementation>,
     build_expressions: Vec<PhysicalExprRef>,
+    filter: Option<JoinFilter>,
 }
 
 impl PerformProbeLookup {
     pub fn new(
         output_schema: SchemaRef,
         probe_stream: SendableRecordBatchStream,
+        probe_id: Option<usize>,
         probe_expressions: Vec<PhysicalExprRef>,
         probe_stream_lookup: Arc<ProbeLookupStreamImplementation>,
         build_expressions: Vec<PhysicalExprRef>,
+        filter: Option<JoinFilter>,
     ) -> Self {
-        Self { output_schema, probe_stream, probe_expressions, probe_stream_lookup, build_expressions }
+        Self { output_schema, probe_stream, probe_id, probe_expressions, probe_stream_lookup, build_expressions, filter }
     }
 }
 
@@ -48,8 +53,10 @@ impl IndexLookupConsumer for PerformProbeLookup {
         let result = self.probe_stream_lookup.streaming_probe_lookup(
             self.output_schema,
             self.probe_stream,
+            self.probe_id,
             self.probe_expressions,
             self.build_expressions,
+            self.filter,
             build_side_records,
             index_lookup,
         );
@@ -81,7 +88,9 @@ impl ParallelHashJoinExecutor {
         partition: usize,
         build_stream: SendableRecordBatchStream,
         probe_stream: SendableRecordBatchStream,
+        probe_id: Option<usize>,
         on: Vec<(PhysicalExprRef, PhysicalExprRef)>,
+        filter: Option<JoinFilter>,
     ) -> SendableRecordBatchStream {
         let output_schema = self.probe_lookup_implementation.schema(build_stream.schema(), probe_stream.schema());
         let probe_lookup_implementation = Arc::clone(&self.probe_lookup_implementation);
@@ -95,9 +104,11 @@ impl ParallelHashJoinExecutor {
                 let probe_lookup = PerformProbeLookup::new(
                     output_schema,
                     probe_stream,
+                    probe_id,
                     probe_expressions,
                     probe_lookup_implementation,
                     build_expressions.clone(),
+                    filter,
                 );
                 let stream = build_implementation.build_side(
                     partition,

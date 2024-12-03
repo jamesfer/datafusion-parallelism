@@ -17,3 +17,6 @@ pub mod partitioned_concurrent_self_hash_join_map;
 pub mod self_hash_map_types;
 pub mod concurrent_queued_self_hash_join_map;
 pub mod static_table;
+pub mod abort_on_drop;
+pub mod local_runtime_reference;
+pub mod parallel_compaction_batch_list;

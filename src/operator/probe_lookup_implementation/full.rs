@@ -5,12 +5,13 @@ use datafusion::arrow::array::{ArrayRef, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Schema, SchemaRef};
 use datafusion::arrow::error::ArrowError;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion_common::DataFusionError;
+use datafusion_common::{DataFusionError, JoinSide};
 use datafusion_physical_expr::PhysicalExprRef;
+use datafusion_physical_plan::joins::utils::JoinFilter;
 use futures::stream::{iter, Iter};
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
-use crate::shared::datafusion_private::{append_right_indices, equal_rows_arr};
+use crate::shared::datafusion_private::{append_right_indices, apply_join_filter_to_indices, equal_rows_arr};
 use crate::shared::shared::{calculate_hash, evaluate_expressions, get_matching_indices_with_probe, take_multiple_record_batch, ProbeBuildIndices};
 use crate::utils::concurrent_bit_set::ConcurrentBitSet;
 use crate::utils::index_lookup::IndexLookup;
@@ -40,6 +41,7 @@ impl FullJoinProbeLookupStream {
         probe_stream: SendableRecordBatchStream,
         probe_expressions: Vec<PhysicalExprRef>,
         build_expressions: Vec<PhysicalExprRef>,
+        filter: Option<JoinFilter>,
         build_side_records: RecordBatch,
         read_only_join_map: Lookup
     ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
@@ -50,6 +52,7 @@ impl FullJoinProbeLookupStream {
             probe_stream,
             probe_expressions,
             build_expressions,
+            filter,
             build_side_records,
             &self.build_side_visited_initializer,
             self.finalizer_copies.get_clone_or_initialize(|| ())
@@ -64,6 +67,7 @@ pub fn full_join_streaming_lookup<Lookup>(
     probe_stream: SendableRecordBatchStream,
     probe_expressions: Vec<PhysicalExprRef>,
     build_expressions: Vec<PhysicalExprRef>,
+    filter: Option<JoinFilter>,
     build_side_records: RecordBatch,
     build_side_visited_initializer: &OnceLock<Arc<ConcurrentBitSet>>,
     finalizer: LimitedRc<()>,
@@ -85,6 +89,7 @@ pub fn full_join_streaming_lookup<Lookup>(
                 &join_schema_clone,
                 &probe_expressions,
                 &build_expressions,
+                &filter,
                 &build_side_records_clone,
                 &build_side_visited_clone,
                 &read_only_join_map,
@@ -110,6 +115,7 @@ fn lookup_full_join_probe_batch<Lookup>(
     output_schema: &SchemaRef,
     probe_expressions: &Vec<PhysicalExprRef>,
     build_expressions: &Vec<PhysicalExprRef>,
+    filter: &Option<JoinFilter>,
     build_side_records: &RecordBatch,
     build_side_visited: &ConcurrentBitSet,
     read_only_join_map: &Lookup,
@@ -136,6 +142,20 @@ where
         // TODO support null_equals_null parameter
         false,
     )?;
+
+    // Apply join filter if exists
+    let (build_indices, probe_indices) = if let Some(filter) = &filter {
+        apply_join_filter_to_indices(
+            build_side_records,
+            probe_batch,
+            build_indices,
+            probe_indices,
+            filter,
+            JoinSide::Left,
+        )?
+    } else {
+        (build_indices, probe_indices)
+    };
 
     // Update the visited build indices
     let mut vec = build_indices.iter().flatten().map(|x| x as usize).collect::<Vec<_>>();

@@ -52,6 +52,34 @@ impl StaticTable {
         }
     }
 
+    pub fn new_with_parallelism(
+        schema: SchemaRef,
+        data: Vec<RecordBatch>,
+        parallelism: usize,
+    ) -> Self {
+        let statistics = Self::make_statistics(&schema, &data);
+        let batches = (0..parallelism).into_iter()
+            .map(|parallel_number| {
+                let records = data.iter()
+                    .enumerate()
+                    .filter_map(|(batch_number, batch)| {
+                        if batch_number % parallelism == parallel_number {
+                            Some(batch.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                Arc::new(StaticPartitionStream { schema: schema.clone(), data: records }) as Arc<dyn PartitionStream>
+            })
+            .collect::<Vec<_>>();
+        let streaming_table = StreamingTable::try_new(schema.clone(), batches).unwrap();
+        Self {
+            statistics,
+            streaming_table,
+        }
+    }
+
     pub fn new_with_fixed_row_count(schema: SchemaRef, data: Vec<RecordBatch>, row_count: usize) -> Self {
         let mut statistics = Self::make_statistics(&schema, &data);
         statistics.num_rows = Precision::Exact(row_count);

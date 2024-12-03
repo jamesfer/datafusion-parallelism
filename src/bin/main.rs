@@ -36,9 +36,9 @@ async fn main() {
     // register_tables(&session_state);
     // run_plan(&session_state).await;
 
-    let session_state = make_session_state(Some(JoinReplacement::New6));
+    let session_state = make_session_state(Some(JoinReplacement::New9));
     register_tables(&session_state);
-    for i in 0..100 {
+    for _ in 0..100 {
         run_plan(&session_state).await;
     }
 }
