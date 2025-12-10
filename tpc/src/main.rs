@@ -195,17 +195,28 @@ pub async fn main() -> Result<()> {
 
     // register all tables in data directory
     let start = Instant::now();
-    for file in fs::read_dir(&opt.data_path)? {
-        let file = file?;
-        let file_path = file.path();
-        let path = format!("{}", file.path().display());
-        if path.ends_with(".parquet") {
+    for entry in fs::read_dir(&opt.data_path)? {
+        let entry = entry?;
+        let file_path = entry.path();
+        let metadata = entry.metadata()?;
+
+        // Check if it's a directory or a .parquet file
+        if metadata.is_dir() || file_path.extension().map_or(false, |ext| ext == "parquet") {
             let filename = Path::file_name(&file_path).unwrap().to_str().unwrap();
-            let table_name = &filename[0..filename.len() - 8];
+
+            // Get table name: remove .parquet extension if present, otherwise use directory name
+            let table_name = if filename.ends_with(".parquet") {
+                &filename[0..filename.len() - 8]
+            } else {
+                filename
+            };
+
+            let path = format!("{}", file_path.display());
+
             if opt.from_memory {
                 register_in_memory_table(&ctx, table_name, &path, opt.memory_partitions.unwrap_or(1)).await?;
             } else {
-                println!("Registering table {} as {}", table_name, path);
+                println!("Registering table {} from {}", table_name, path);
                 ctx.register_parquet(table_name, &path, ParquetReadOptions::default())
                     .await?;
             }
