@@ -150,7 +150,7 @@ run_benchmark() {
     CMD="cargo run --release --"
     CMD="$CMD --data-path ./data"
     CMD="$CMD --output ./output"
-    CMD="$CMD --query-path ./datafusion-benchmarks/tpch/queries"
+    CMD="$CMD --query-path ./queries"
     CMD="$CMD --iterations $ITERATIONS"
 
     # Only add join version if specified
