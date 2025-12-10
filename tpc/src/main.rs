@@ -93,7 +93,7 @@ struct Opt {
 
     /// Concurrency, determining the number of partitions for queries
     #[structopt(short, long)]
-    concurrency: u8,
+    concurrency: Option<u8>,
 
     /// Iterations (number of times to run each query)
     #[structopt(short, long)]
@@ -140,7 +140,7 @@ impl Results {
     }
 }
 
-#[tokio::main(worker_threads = 8)]
+#[tokio::main]
 pub async fn main() -> Result<()> {
     let mut results = Results::new();
     for arg in std::env::args() {
@@ -152,7 +152,10 @@ pub async fn main() -> Result<()> {
     let query_path = format!("{}", opt.query_path.display());
     let output_path = format!("{}", opt.output.display());
 
-    let mut config = SessionConfig::new().with_target_partitions(opt.concurrency as usize);
+    let mut config = SessionConfig::new();
+    if let Some(concurrency) = opt.concurrency {
+        config = config.with_target_partitions(concurrency as usize);
+    }
 
     if let Some(config_path) = &opt.config_path {
         let file = File::open(config_path)?;

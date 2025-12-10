@@ -149,9 +149,9 @@ run_benchmark() {
     # Note: concurrency is determined by the number of CPU cores available
     CMD="cargo run --release --"
     CMD="$CMD --data-path ./data"
-    CMD="$CMD --iterations $ITERATIONS"
     CMD="$CMD --output ./output"
     CMD="$CMD --query-path ./datafusion-benchmarks/tpch/queries"
+    CMD="$CMD --iterations $ITERATIONS"
 
     # Only add join version if specified
     if [[ -n "$JOIN_VERSION" ]]; then
