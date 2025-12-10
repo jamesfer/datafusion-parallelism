@@ -18,7 +18,7 @@ QUERY=""
 EXCLUDE_QUERIES=""
 JOIN_VERSION=""
 LOCAL_RESULTS_DIR="./benchmark-results"
-REPO_URL="https://github.com/jamesfer/datafusion-parallelism.git"
+REPO="jamesfer/datafusion-parallelism"
 REPO_BRANCH="master"
 
 # Parse command line arguments
@@ -42,7 +42,7 @@ OPTIONS:
     -q, --query NUM              Specific query to run (optional)
     -e, --exclude QUERIES        Comma-separated queries to exclude (optional)
     -j, --join-version VERSION   Join version (e.g., version3) (optional)
-    --repo-url URL               Repository URL (default: current repo)
+    --repo OWNER/REPO            GitHub repository (default: jamesfer/datafusion-parallelism)
     --repo-branch BRANCH         Repository branch (default: master)
     -h, --help                   Show this help message
 
@@ -129,8 +129,8 @@ while [[ $# -gt 0 ]]; do
             JOIN_VERSION="$2"
             shift 2
             ;;
-        --repo-url)
-            REPO_URL="$2"
+        --repo)
+            REPO="$2"
             shift 2
             ;;
         --repo-branch)
@@ -191,7 +191,7 @@ if [[ -n "$EXCLUDE_QUERIES" ]]; then
 fi
 echo ""
 echo "Repository:"
-echo "  URL: $REPO_URL"
+echo "  Repo: $REPO"
 echo "  Branch: $REPO_BRANCH"
 echo ""
 
@@ -201,7 +201,7 @@ STARTUP_SCRIPT=$(cat << 'SCRIPT_END'
 set -euo pipefail
 
 # Export configuration as environment variables
-export REPO_URL="__REPO_URL__"
+export REPO="__REPO__"
 export REPO_BRANCH="__REPO_BRANCH__"
 export DATA_SOURCE="__DATA_SOURCE__"
 export RESULTS_DEST="__RESULTS_DEST__"
@@ -218,7 +218,7 @@ echo "========================================" | tee -a /var/log/startup-script
 
 # Download and run the benchmark script
 echo "Downloading benchmark script..." | tee -a /var/log/startup-script.log
-SCRIPT_URL="https://raw.githubusercontent.com/${REPO_URL#https://github.com/}/${REPO_BRANCH}/tpc/scripts/_run_benchmark.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/${REPO}/refs/heads/${REPO_BRANCH}/tpc/scripts/_run_benchmark.sh"
 echo "URL: $SCRIPT_URL" | tee -a /var/log/startup-script.log
 
 curl -fsSL "$SCRIPT_URL" -o /tmp/run_benchmark.sh 2>&1 | tee -a /var/log/startup-script.log
@@ -236,7 +236,7 @@ SCRIPT_END
 )
 
 # Substitute variables in startup script
-STARTUP_SCRIPT="${STARTUP_SCRIPT//__REPO_URL__/$REPO_URL}"
+STARTUP_SCRIPT="${STARTUP_SCRIPT//__REPO__/$REPO}"
 STARTUP_SCRIPT="${STARTUP_SCRIPT//__REPO_BRANCH__/$REPO_BRANCH}"
 STARTUP_SCRIPT="${STARTUP_SCRIPT//__DATA_SOURCE__/$DATA_SOURCE}"
 STARTUP_SCRIPT="${STARTUP_SCRIPT//__RESULTS_DEST__/$RESULTS_DEST}"

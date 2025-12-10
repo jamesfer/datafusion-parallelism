@@ -4,8 +4,11 @@ set -euo pipefail
 # This script runs on a cloud instance to perform TPC-H benchmarks
 # It installs dependencies, clones the repo, downloads data, runs benchmarks, and uploads results
 
+# Set HOME if not set (happens when running as startup script)
+export HOME="${HOME:-/root}"
+
 # Configuration via environment variables with defaults
-REPO_URL="${REPO_URL:-https://github.com/jamesfer/datafusion-parallelism.git}"
+REPO="${REPO:-jamesfer/datafusion-parallelism}"
 REPO_BRANCH="${REPO_BRANCH:-master}"
 DATA_SOURCE="${DATA_SOURCE:-}"  # S3 or GCS path to download TPC-H data
 RESULTS_DEST="${RESULTS_DEST:-}" # S3 or GCS path to upload results
@@ -20,7 +23,7 @@ echo "TPC-H Benchmark Runner for Cloud Instances"
 echo "============================================"
 echo ""
 echo "Configuration:"
-echo "  Repository: $REPO_URL @ $REPO_BRANCH"
+echo "  Repository: $REPO @ $REPO_BRANCH"
 echo "  Data Source: ${DATA_SOURCE:-<none, will generate locally>}"
 echo "  Results Destination: ${RESULTS_DEST:-<none, results stay local>}"
 echo "  Iterations: $ITERATIONS"
@@ -92,7 +95,7 @@ install_cloud_cli() {
 clone_repo() {
     echo "==> Cloning repository..."
     cd "$HOME"
-    git clone -b "$REPO_BRANCH" "$REPO_URL" datafusion-parallelism
+    git clone -b "$REPO_BRANCH" "https://github.com/${REPO}.git" datafusion-parallelism
     cd datafusion-parallelism/tpc
     echo "==> Repository cloned to ~/datafusion-parallelism"
 }
