@@ -1,4 +1,4 @@
-#![feature(array_chunks)]
+#![feature(iter_array_chunks)]
 
 pub mod parse_sql;
 pub mod utils;

@@ -255,9 +255,12 @@ impl BulkGroupStrategyN for Group4 {
         assert_eq!(N % 2, 0);
 
         let mut output_data = [IterableBitMaskIntrinsics8x4::new_unchecked(0); N];
-        for ((search_tags, group), output_data) in search_tag.array_chunks::<4>()
-            .zip(group.array_chunks::<4>())
-            .zip(output_data.array_chunks_mut::<4>()) {
+        let (search_chunks, _) = search_tag.as_chunks::<4>();
+        let (group_chunks, _) = group.as_chunks::<4>();
+        let (output_chunks, _) = output_data.as_chunks_mut::<4>();
+        for ((search_tags, group), output_data) in search_chunks.iter()
+            .zip(group_chunks.iter())
+            .zip(output_chunks.iter_mut()) {
 
             // Loads 4 u8 values into 4 64 bit registers by duplicating all the values
             let search_tags_x4 = interleave_x4_d(search_tags);
@@ -612,9 +615,12 @@ impl BulkGroupStrategyN for Group8 {
         assert_eq!(N % 2, 0);
 
         let mut output_data = [IterableBitMaskIntrinsics8x8::new_unchecked(0); N];
-        for ((search_tags, group), output_data) in search_tag.array_chunks::<2>()
-            .zip(group.array_chunks::<2>())
-            .zip(output_data.array_chunks_mut::<2>()) {
+        let (search_chunks, _) = search_tag.as_chunks::<2>();
+        let (group_chunks, _) = group.as_chunks::<2>();
+        let (output_chunks, _) = output_data.as_chunks_mut::<2>();
+        for ((search_tags, group), output_data) in search_chunks.iter()
+            .zip(group_chunks.iter())
+            .zip(output_chunks.iter_mut()) {
             // Replicate the search value 8 times into a 64-bit register
             // let search_register = aarch64::vld1_dup_u8(&search_tag[left]);
 

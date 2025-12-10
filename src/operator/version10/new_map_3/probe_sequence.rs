@@ -136,8 +136,10 @@ impl ProbeSequenceBulk32 for HybridProbeSequence<8> {
     #[inline(always)]
     unsafe fn start_indices(hashes: &[u64; 32], capacity_mask: Self::CapacityMask) -> [u64; 32] {
         let mut output = [0u64; 32];
-        for (output, hashes) in output.array_chunks_mut::<2>()
-            .zip(hashes.array_chunks::<2>()) {
+
+        let (output_chunks, _) = output.as_chunks_mut::<2>();
+        let (hash_chunks, _) = hashes.as_chunks::<2>();
+        for (mut output, hashes) in output_chunks.iter_mut().zip(hash_chunks.iter()) {
             let hashes_register = aarch64::vld1q_u64(hashes.as_ptr());
             let result = aarch64::vandq_u64(hashes_register, capacity_mask);
             aarch64::vst1q_u64(output.as_mut_ptr(), result);

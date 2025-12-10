@@ -6,13 +6,13 @@ set -euo pipefail
 # Default configuration
 INSTANCE_NAME="tpch-benchmark-$(date +%s)"
 INSTANCE_TYPE="c2-standard-8"
-ZONE="us-central1-a"
+ZONE="europe-west1-b"
 PROJECT=""  # Will use gcloud default if not specified
 IMAGE_FAMILY="ubuntu-minimal-2404-lts"
 IMAGE_PROJECT="ubuntu-os-cloud"
 DATA_SOURCE=""
 RESULTS_DEST=""
-ITERATIONS="10"
+ITERATIONS="100"
 SCALE_FACTOR="10"
 QUERY=""
 EXCLUDE_QUERIES=""

@@ -12,7 +12,7 @@ REPO="${REPO:-jamesfer/datafusion-parallelism}"
 REPO_BRANCH="${REPO_BRANCH:-master}"
 DATA_SOURCE="${DATA_SOURCE:-}"  # S3 or GCS path to download TPC-H data
 RESULTS_DEST="${RESULTS_DEST:-}" # S3 or GCS path to upload results
-ITERATIONS="${ITERATIONS:-10}"
+ITERATIONS="${ITERATIONS:-100}"
 SCALE_FACTOR="${SCALE_FACTOR:-10}"
 QUERY="${QUERY:-}"  # Empty means run all queries
 EXCLUDE_QUERIES="${EXCLUDE_QUERIES:-}"
@@ -55,8 +55,8 @@ install_rust() {
     if command -v rustc &> /dev/null; then
         echo "==> Rust already installed: $(rustc --version)"
     else
-        echo "==> Installing Rust..."
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        echo "==> Installing Rust (nightly)..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
         source "$HOME/.cargo/env"
         echo "==> Rust installed: $(rustc --version)"
     fi
