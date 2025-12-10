@@ -1,7 +1,10 @@
+use std::time::{Duration, SystemTime};
+use async_std::prelude::FutureExt;
 use datafusion::arrow;
 use datafusion::arrow::array::{ArrayRef, RecordBatch};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion_common::DataFusionError;
+use tokio::time::timeout;
 
 pub struct ParallelCompactionBatchList {
     schema: SchemaRef,
@@ -50,12 +53,20 @@ impl ParallelCompactionBatchList {
 
         // Try to participate in the compaction
         loop {
-            match self.receivers.recv_async().await {
+            let result = timeout(Duration::from_secs(20), self.receivers.recv_async())
+                .await
+                .map_err(|_| DataFusionError::Internal("Possible deadlock while waiting for column to compact".to_string()))?;
+            match result {
                 Ok((index, column_receiver)) => {
+                    let start = SystemTime::now();
+
                     // Compact the columns in the receiver
                     let mut unsorted_chunks = Vec::new();
                     loop {
-                        match column_receiver.recv_async().await {
+                        let result = timeout(Duration::from_secs(20), column_receiver.recv_async())
+                            .await
+                            .map_err(|_| DataFusionError::Internal("Possible deadlock while waiting for contents of column for compaction".to_string()))?;
+                        match result {
                             Ok((chunk_index, column_chunk)) => {
                                 unsorted_chunks.push((chunk_index, column_chunk));
                             }
@@ -66,7 +77,14 @@ impl ParallelCompactionBatchList {
                     }
                     unsorted_chunks.sort_by_key(|(chunk_index, _)| *chunk_index);
                     let columns = unsorted_chunks.iter().map(|(_, column_chunk)| column_chunk.as_ref()).collect::<Vec<_>>();
+
+                    let compact_start = SystemTime::now();
                     let compacted = arrow::compute::concat(columns.as_slice())?;
+                    let end = SystemTime::now();
+                    let duration = end.duration_since(start).unwrap();
+                    let compacted_duration = end.duration_since(compact_start).unwrap();
+                    // println!("Compacted column {} in {:?} (compaction {:?}) from {} chunks, rows {}, size {}", self.schema.field(index), duration, compacted_duration, unsorted_chunks.len(), compacted.len(), compacted.get_array_memory_size());
+
                     self.completed_columns_sender.send((index, compacted)).unwrap();
                 }
                 Err(_disconnected) => {
@@ -81,7 +99,10 @@ impl ParallelCompactionBatchList {
         // Collect the compacted columns into a record batch
         let mut unsorted_columns = Vec::with_capacity(self.schema.fields().len());
         loop {
-            match self.completed_columns.recv().await {
+            let result = timeout(Duration::from_secs(20), self.completed_columns.recv())
+                .await
+                .map_err(|_| DataFusionError::Internal("Possible deadlock while waiting for all completed columns".to_string()))?;
+            match result {
                 Ok((index, column)) => {
                     unsorted_columns.push((index, column));
                 }

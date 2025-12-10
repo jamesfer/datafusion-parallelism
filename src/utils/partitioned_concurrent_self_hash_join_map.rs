@@ -1,6 +1,6 @@
 use std::mem;
 use std::sync::{Arc, Mutex, OnceLock};
-
+use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::utils::index_lookup::IndexLookup;
 use crate::utils::limited_rc::LimitedRc;
 use crate::utils::once_notify::OnceNotify;
@@ -243,14 +243,14 @@ impl ShardCompactor {
 }
 
 pub struct WritablePartitionedConcurrentSelfHashJoinMap {
-    global_offset: LimitedRc<Mutex<(usize, usize)>>,
+    global_offset: LimitedRc<AtomicUsize>,
     shards: LimitedRc<Vec<Shard>>,
     shard_compactor: ShardCompactor,
 }
 
 impl WritablePartitionedConcurrentSelfHashJoinMap {
     fn new(
-        global_offset: LimitedRc<Mutex<(usize, usize)>>,
+        global_offset: LimitedRc<AtomicUsize>,
         shards: LimitedRc<Vec<Shard>>,
         compactor: ShardCompactor) -> Self {
         Self {
@@ -263,13 +263,7 @@ impl WritablePartitionedConcurrentSelfHashJoinMap {
     pub fn insert_all(&self, hashes: Vec<u64>) -> usize {
         // Increment the global offset to ensure this vector's offsets can be made relative to all
         // previously inserted vectors
-        let (index, offset) = {
-            let mut global_offset = self.global_offset.lock().unwrap();
-            let index = global_offset.0;
-            let offset = global_offset.1;
-            *global_offset = (index + 1, offset + hashes.len());
-            (index, offset)
-        };
+        let offset = self.global_offset.fetch_add(hashes.len(), Ordering::Relaxed);
 
         // Group into shards
         let mut shard_groups = vec![vec![]; self.shards.len()];
@@ -283,7 +277,7 @@ impl WritablePartitionedConcurrentSelfHashJoinMap {
             self.shards[shard_number].enqueue(group);
         }
 
-        index
+        offset
     }
 
     pub async fn consume_and_distribute_shards(self) -> LocalShardListBuilder {
@@ -364,7 +358,7 @@ pub fn create_writable_self_hash_join_map(count: usize) -> Vec<WritablePartition
     // Create the compactors which are all linked to each other
     let compactors = ShardCompactor::create(count, shard_number);
 
-    let global_offset = LimitedRc::new_copies(Mutex::new((0usize, 0usize)), count);
+    let global_offset = LimitedRc::new_copies(AtomicUsize::new(0), count);
 
     global_offset.into_iter()
         .zip(shard_copies.into_iter())

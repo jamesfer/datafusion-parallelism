@@ -1,3 +1,5 @@
+#![feature(array_chunks)]
+
 pub mod parse_sql;
 pub mod utils;
 pub mod api_utils;
@@ -54,7 +56,13 @@ mod tests {
         inner_join_no_filter_new7: Some(JoinReplacement::New7),
         inner_join_no_filter_new8: Some(JoinReplacement::New8),
         inner_join_no_filter_new9: Some(JoinReplacement::New9),
+        inner_join_no_filter_new10: Some(JoinReplacement::New10),
     }
+
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn inner_join_no_filter_new10_solo() {
+    //     inner_join_no_filter(Some(JoinReplacement::New10)).await
+    // }
 
     async fn inner_join_no_filter(rule: Option<JoinReplacement>) {
         let session_state = make_session_state_with_config(rule, None, true);
@@ -76,11 +84,12 @@ mod tests {
         ).await
             .unwrap();
 
-        let mut display_plan = displayable(plan.as_ref());
+        let display_plan = displayable(plan.as_ref());
         println!("{}", display_plan.set_show_schema(true).indent(true));
 
+        let schema = plan.schema();
         let results = collect(plan, Arc::new(TaskContext::default())).await.unwrap();
-        let single_result = concat_batches(&results[0].schema(), results.iter()).unwrap();
+        let single_result = concat_batches(&schema, results.iter()).unwrap();
         let indices = sort_to_indices(single_result.column(0), None, None).unwrap();
         let columns = single_result.columns().iter().map(|c| take(&*c, &indices, None).unwrap()).collect();
         let sorted = RecordBatch::try_new(single_result.schema(), columns).unwrap();
@@ -134,6 +143,7 @@ mod tests {
         inner_join_with_nulls_new7: Some(JoinReplacement::New7),
         inner_join_with_nulls_new8: Some(JoinReplacement::New8),
         inner_join_with_nulls_new9: Some(JoinReplacement::New9),
+        inner_join_with_nulls_new10: Some(JoinReplacement::New10),
     }
 
     async fn inner_join_with_nulls(rule: Option<JoinReplacement>) {
@@ -194,6 +204,7 @@ mod tests {
         inner_join_without_matches_new7: Some(JoinReplacement::New7),
         inner_join_without_matches_new8: Some(JoinReplacement::New8),
         inner_join_without_matches_new9: Some(JoinReplacement::New9),
+        inner_join_without_matches_new10: Some(JoinReplacement::New10),
     }
 
     async fn inner_join_without_matches(rule: Option<JoinReplacement>) {
@@ -246,6 +257,7 @@ mod tests {
         left_join_new7: Some(JoinReplacement::New7),
         left_join_new8: Some(JoinReplacement::New8),
         left_join_new9: Some(JoinReplacement::New9),
+        left_join_new10: Some(JoinReplacement::New10),
     }
 
     async fn left_join(rule: Option<JoinReplacement>) {
@@ -306,6 +318,7 @@ mod tests {
         left_semi_join_new7: Some(JoinReplacement::New7),
         left_semi_join_new8: Some(JoinReplacement::New8),
         left_semi_join_new9: Some(JoinReplacement::New9),
+        left_semi_join_new10: Some(JoinReplacement::New10),
     }
 
     async fn left_semi_join(rule: Option<JoinReplacement>) {
@@ -370,6 +383,7 @@ mod tests {
         left_anti_join_new7: Some(JoinReplacement::New7),
         left_anti_join_new8: Some(JoinReplacement::New8),
         left_anti_join_new9: Some(JoinReplacement::New9),
+        left_anti_join_new10: Some(JoinReplacement::New10),
     }
 
     async fn left_anti_join(rule: Option<JoinReplacement>) {
@@ -434,6 +448,7 @@ mod tests {
         right_join_new7: Some(JoinReplacement::New7),
         right_join_new8: Some(JoinReplacement::New8),
         right_join_new9: Some(JoinReplacement::New9),
+        right_join_new10: Some(JoinReplacement::New10),
     }
 
     async fn right_join(rule: Option<JoinReplacement>) {
@@ -494,6 +509,7 @@ mod tests {
         right_anti_join_new7: Some(JoinReplacement::New7),
         right_anti_join_new8: Some(JoinReplacement::New8),
         right_anti_join_new9: Some(JoinReplacement::New9),
+        right_anti_join_new10: Some(JoinReplacement::New10),
     }
 
     async fn right_anti_join(rule: Option<JoinReplacement>) {
@@ -569,6 +585,7 @@ mod tests {
         full_join_new7: Some(JoinReplacement::New7),
         full_join_new8: Some(JoinReplacement::New8),
         full_join_new9: Some(JoinReplacement::New9),
+        full_join_new10: Some(JoinReplacement::New10),
     }
 
     async fn full_join(rule: Option<JoinReplacement>) {
@@ -628,6 +645,7 @@ mod tests {
         full_join_with_filter_new7: Some(JoinReplacement::New7),
         full_join_with_filter_new8: Some(JoinReplacement::New8),
         full_join_with_filter_new9: Some(JoinReplacement::New9),
+        full_join_with_filter_new10: Some(JoinReplacement::New10),
     }
 
     async fn full_join_with_filter(rule: Option<JoinReplacement>) {

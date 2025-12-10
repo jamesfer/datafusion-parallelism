@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use criterion::async_executor::AsyncExecutor;
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::col;
@@ -30,12 +30,14 @@ use datafusion_parallelism::utils::index_lookup::IndexLookup;
 
 fn make_config() -> Criterion {
     Criterion::default()
-        .warm_up_time(Duration::from_secs(15))
-        .measurement_time(Duration::from_secs(60))
+        .warm_up_time(Duration::from_secs(5))
+        .measurement_time(Duration::from_secs(15))
 }
 
 // Number of power cores on an Apple M1 max
 const PARALLELISM: usize = 8;
+
+type BuildImplementationSession = Box<dyn Fn(SchemaRef) -> BuildImplementation + Sync>;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let rt = Builder::new_multi_thread()
@@ -48,16 +50,17 @@ fn criterion_benchmark(c: &mut Criterion) {
         Box::new(Size512),
     ];
 
-    let sessions: Vec<(&str, Box<dyn Fn() -> BuildImplementation + Sync>)> = vec![
-        ("version1", Box::new(|| BuildImplementation::new(JoinReplacement::Original, PARALLELISM))),
-        ("version2", Box::new(|| BuildImplementation::new(JoinReplacement::New, PARALLELISM))),
-        ("version3", Box::new(|| BuildImplementation::new(JoinReplacement::New3, PARALLELISM))),
-        // ("version4", Box::new(|| BuildImplementation::new(JoinReplacement::New4, PARALLELISM))),
-        // ("version5", Box::new(|| BuildImplementation::new(JoinReplacement::New5, PARALLELISM))),
-        // ("version6", Box::new(|| BuildImplementation::new(JoinReplacement::New6, PARALLELISM))),
-        // ("version7", Box::new(|| BuildImplementation::new(JoinReplacement::New7, PARALLELISM))),
-        // ("version7", Box::new(|| BuildImplementation::new(JoinReplacement::New7, PARALLELISM))),
-        ("version8", Box::new(|| BuildImplementation::new(JoinReplacement::New8, PARALLELISM))),
+    let sessions: Vec<(&str, BuildImplementationSession)> = vec![
+        ("version1", Box::new(|schema| BuildImplementation::new(JoinReplacement::Original, PARALLELISM, schema))),
+        ("version2", Box::new(|schema| BuildImplementation::new(JoinReplacement::New, PARALLELISM, schema))),
+        ("version3", Box::new(|schema| BuildImplementation::new(JoinReplacement::New3, PARALLELISM, schema))),
+        // ("version4", Box::new(|schema| BuildImplementation::new(JoinReplacement::New4, PARALLELISM, schema))),
+        // ("version5", Box::new(|schema| BuildImplementation::new(JoinReplacement::New5, PARALLELISM, schema))),
+        // ("version6", Box::new(|schema| BuildImplementation::new(JoinReplacement::New6, PARALLELISM, schema))),
+        // ("version7", Box::new(|schema| BuildImplementation::new(JoinReplacement::New7, PARALLELISM, schema))),
+        // ("version7", Box::new(|schema| BuildImplementation::new(JoinReplacement::New7, PARALLELISM, schema))),
+        ("version8", Box::new(|schema| BuildImplementation::new(JoinReplacement::New8, PARALLELISM, schema))),
+        ("version10", Box::new(|schema| BuildImplementation::new(JoinReplacement::New10, PARALLELISM, schema))),
     ];
 
     for scenario in scenarios {
@@ -113,8 +116,7 @@ impl IndexLookupConsumer for NoopConsumer {
 trait BenchmarkQuery {
     fn name(&self) -> &str;
 
-    async fn setup_async<'a>(&self, session_state: &'a Box<dyn Fn() -> BuildImplementation + Sync>) -> Box<dyn FnMut() -> BoxFuture<'a, ()> + 'a>;
-    // fn setup<'a>(&self, session_state: &'a Box<dyn Fn() -> BuildImplementation + Sync>) -> BoxFuture<'a, Box<dyn FnMut() -> BoxFuture<'a, ()> + 'a>>;
+    async fn setup_async<'a>(&self, session_state: &'a BuildImplementationSession) -> Box<dyn FnMut() -> BoxFuture<'a, ()> + 'a>;
 }
 
 fn operation_func<'a, Fn, Fut>(mut func: Fn) -> Box<dyn FnMut() -> BoxFuture<'a, ()> + 'a>
@@ -134,10 +136,10 @@ impl BenchmarkQuery for Size512 {
         "Size512"
     }
 
-    async fn setup_async<'a>(&self, implementation: &'a Box<dyn Fn() -> BuildImplementation + Sync>) -> Box<dyn FnMut() -> BoxFuture<'a, ()> + 'a> {
+    async fn setup_async<'a>(&self, implementation: &'a BuildImplementationSession) -> Box<dyn FnMut() -> BoxFuture<'a, ()> + 'a> {
         let batches = 512;
         let batches_per_parallelism = (batches / PARALLELISM) as i32;
-        let batch_size = 1024;
+        let batch_size = 8192;
         let schema = small_table_schema();
         let join_tables = (0..PARALLELISM).into_iter()
             .map(|parallelism| {
@@ -156,7 +158,7 @@ impl BenchmarkQuery for Size512 {
             })
             .collect::<Vec<_>>();
         let expr = col("id");
-        let df_schema = DFSchema::try_from(schema).unwrap();
+        let df_schema = DFSchema::try_from(schema.clone()).unwrap();
         let props = ExecutionProps::new();
         let physical_expr = vec![create_physical_expr(&expr, &df_schema, &props).unwrap()];
 
@@ -168,10 +170,11 @@ impl BenchmarkQuery for Size512 {
             // by the function.
             let physical_expr = physical_expr.clone();
             let join_tables = join_tables.clone();
+            let schema = schema.clone();
 
             async move {
                 // Create an implementation for all threads to use
-                let implementation = Arc::new(implementation());
+                let implementation = Arc::new(implementation(schema.clone()));
 
                 let mut join_set = JoinSet::new();
                 for i in 0..PARALLELISM {

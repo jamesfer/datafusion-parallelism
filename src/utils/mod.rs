@@ -20,3 +20,5 @@ pub mod static_table;
 pub mod abort_on_drop;
 pub mod local_runtime_reference;
 pub mod parallel_compaction_batch_list;
+pub mod barrier_once;
+pub mod initialize_last;

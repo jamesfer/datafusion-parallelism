@@ -20,6 +20,7 @@ pub enum JoinReplacement {
     New7,
     New8,
     New9,
+    New10,
 }
 
 pub fn make_session_state(use_new_join_rule: Option<JoinReplacement>) -> SessionState {

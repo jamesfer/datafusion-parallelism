@@ -7,6 +7,7 @@ use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::task::{ready, Context, Poll};
+use std::time::{Duration, SystemTime};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
@@ -19,221 +20,99 @@ use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use futures::task::SpawnExt;
 use futures_core::Stream;
 use tokio::sync::{Mutex, OnceCell, Semaphore};
-use tokio::task::{JoinHandle, JoinSet, LocalSet};
+use tokio::time::timeout;
 use crate::utils::abort_on_drop::AbortOnDrop;
-use crate::utils::local_runtime_reference::{get_local_runtime, NotifyHandle};
-// struct LimitedWorker {
-//     receiver: flume::Receiver<RecordBatch>,
-//     sender: flume::Sender<RecordBatch>,
-//     limit: usize,
-// }
-//
-// impl LimitedWorker {
-//     async fn push(&self, batch: RecordBatch) -> Result<(), SendError<T>> {
-//         self.sender.send_async(batch)
-//             .await?;
-//         Ok(())
-//     }
-//
-//     async fn pop(&self) -> Result<RecordBatch, RecvError> {
-//         let batch = self.receiver.recv_async()
-//             .await?;
-//         Ok(batch)
-//     }
-//
-//     fn pop_many(&self, n: usize) -> Result<Vec<RecordBatch>, RecvError> {
-//         let mut batches = Vec::with_capacity(n);
-//         for _ in 0..n {
-//             match self.receiver.try_recv() {
-//                 Ok(batch) => batches.push(batch),
-//                 // Exit the loop early if the queue is empty
-//                 Err(TryRecvError::Empty) => break,
-//                 Err(TryRecvError::Disconnected) => {
-//                     if batches.is_empty() {
-//                         return Err(RecvError::Disconnected);
-//                     } else {
-//                         break;
-//                     }
-//                 },
-//             }
-//         }
-//         Ok(batches)
-//     }
-// }
 
-struct LimitedWorkerStream {
-    worker: flume::Receiver<RecordBatch>,
-    next_future: Option<Pin<Box<dyn Future<Output=Result<RecordBatch, RecvError>> + Send + Sync>>>,
+async fn consume_input(
+    id: usize,
+    partition: usize,
+    mut stream: SendableRecordBatchStream,
+    destination: flume::Sender<RecordBatch>,
+) -> Result<(), DataFusionError> {
+    while let Some(batch) = stream.next().await {
+        destination.send_async(batch?).await
+            .map_err(|_| DataFusionError::Internal("Failed to send batch to internal repartition queue".to_string()))?;
+    }
+    Ok(())
 }
 
-// impl LimitedWorkerStream {
-//     fn new(worker: flume::Receiver<RecordBatch>) -> Self {
-//         Self {
-//             worker,
-//             next_future: None,
-//         }
-//     }
-// }
-//
-// impl Stream for LimitedWorkerStream {
-//     type Item = RecordBatch;
-//
-//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//         println!("Poll next");
-//
-//
-//         let mut fut = match self.next_future.take() {
-//             None => Box::pin(self.worker.recv_async()),
-//             Some(fut) => fut
-//         };
-//
-//         // Try to poll the future
-//         let value = match fut.as_mut().poll(cx) {
-//             Poll::Ready(value) => value,
-//             Poll::Pending => {
-//                 // Save the current future to be polled later
-//                 self.next_future = Some(fut);
-//                 return Poll::Pending;
-//             }
-//         };
-//
-//         match value {
-//             Ok(value) => {
-//                 println!("Worker received batch");
-//                 Poll::Ready(Some(value))
-//             },
-//             Err(_) => {
-//                 println!("Worker stream reached recv error");
-//                 Poll::Ready(None)
-//             },
-//         }
-//         //
-//         // loop {
-//         //     let mut fut = tokio::time::timeout(std::time::Duration::from_secs(1), fut);
-//         //     let value = match pin!(fut).poll(cx) {
-//         //         Poll::Ready(v) => v,
-//         //         Poll::Pending => {
-//         //             println!("Local stream not ready, senders: {}", self.worker.sender_count());
-//         //             return Poll::Pending;
-//         //         },
-//         //     };
-//         //     match value {
-//         //         Ok(Ok(value)) => {
-//         //             println!("Worker received batch {}", self.i);
-//         //             return Poll::Ready(Some(value));
-//         //         },
-//         //         Err(_) => {
-//         //             println!("timeout waiting {}", self.i);
-//         //         },
-//         //         Ok(Err(_)) => {
-//         //             println!("Worker stream reached recv error");
-//         //             return Poll::Ready(None);
-//         //         },
-//         //     }
-//         // }
-//     }
-// }
-
-fn make_flume_stream<T>(flume: flume::Receiver<T>) -> impl Stream<Item=T> {
+fn make_flume_stream<T>(flume: flume::Receiver<T>, id: usize, partition: usize) -> impl Stream<Item=T> {
     futures::stream::unfold(flume, |flume| async {
         match flume.recv_async().await {
+            // Return the value and continue unfolding
             Ok(value) => Some((value, flume)),
-            // Stream finished
-            Err(_) => None
+            // Sender closed
+            Err(_) => None,
         }
     })
 }
 
 fn make_stealer_stream(steal_queues: Vec<flume::Receiver<RecordBatch>>) -> impl Stream<Item=Vec<RecordBatch>> {
     let steal_queues = steal_queues.into_iter().collect::<VecDeque<_>>();
-    futures::stream::unfold(steal_queues, |mut steal_queues| async {
-        // Get the next available worker
-        let steal_queue = match steal_queues.pop_front() {
-            Some(queue) => queue,
-            None => return None,
-        };
+    futures::stream::unfold((SystemTime::now(), steal_queues), |mut input| async move {
+        let (previous_steal_time, mut steal_queues) = input;
 
-        match pop_many(&steal_queue, 5) {
-            Ok(batches) => {
-                // Return the worker to the back of the queue
-                steal_queues.push_back(steal_queue);
-                Some((batches, steal_queues))
-            },
-            // If the queue is disconnected, don't add it back to the list, and continue looping
-            // looking for things to steal
-            Err(_) => Some((vec![], steal_queues)),
+        // The outer loop will continue until we find something to steal, or we have exhausted all
+        // queues
+        while !steal_queues.is_empty() {
+            // The inner loop will attempt to steal once from each queue
+            let initial_steal_queues = steal_queues.len();
+            let mut steal_attempts = 0;
+            while steal_attempts < initial_steal_queues {
+                // Get the next available worker
+                let steal_queue = match steal_queues.pop_front() {
+                    Some(queue) => queue,
+                    // No more workers to steal from, finish the stream
+                    None => return None,
+                };
+
+                steal_attempts += 1;
+                let (batches, state) = pop_many(&steal_queue, 5);
+
+                // If the receiver is still alive, add them back to the queue
+                if state == ReceiverState::Alive {
+                    steal_queues.push_back(steal_queue);
+                }
+
+                if batches.len() > 0 {
+                    return Some((batches, (SystemTime::now(), steal_queues)))
+                }
+            }
+
+            // If we have tried each queue at least once, sleep for a small amount of time, and then
+            // try again
+            // println!("Stealing failed, sleeping. Attempts: {}, remaining queues: {}", steal_attempts, steal_queues.len());
+            // tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::task::yield_now().await;
         }
+
+        None
     })
 }
 
-fn pop_many(receiver: &flume::Receiver<RecordBatch>, n: usize) -> Result<Vec<RecordBatch>, RecvError> {
+#[derive(Debug, PartialEq, Eq)]
+enum ReceiverState {
+    Alive,
+    Disconnected,
+}
+
+fn pop_many(receiver: &flume::Receiver<RecordBatch>, n: usize) -> (Vec<RecordBatch>, ReceiverState) {
     let mut batches = Vec::with_capacity(n);
+    let mut receiver_state = ReceiverState::Alive;
     for _ in 0..n {
         match receiver.try_recv() {
             Ok(batch) => batches.push(batch),
             // Exit the loop early if the queue is empty
             Err(TryRecvError::Empty) => break,
             Err(TryRecvError::Disconnected) => {
-                if batches.is_empty() {
-                    return Err(RecvError::Disconnected);
-                } else {
-                    break;
-                }
+                receiver_state = ReceiverState::Disconnected;
+                break;
             },
         }
     }
-    Ok(batches)
-}
 
-// struct StealingStream {
-//     steal_queues: VecDeque<flume::Receiver<RecordBatch>>,
-// }
-//
-// impl StealingStream {
-//     fn pop_many(receiver: &flume::Receiver<RecordBatch>, n: usize) -> Result<Vec<RecordBatch>, RecvError> {
-//         let mut batches = Vec::with_capacity(n);
-//         for _ in 0..n {
-//             match receiver.try_recv() {
-//                 Ok(batch) => batches.push(batch),
-//                 // Exit the loop early if the queue is empty
-//                 Err(TryRecvError::Empty) => break,
-//                 Err(TryRecvError::Disconnected) => {
-//                     if batches.is_empty() {
-//                         return Err(RecvError::Disconnected);
-//                     } else {
-//                         break;
-//                     }
-//                 },
-//             }
-//         }
-//         Ok(batches)
-//     }
-// }
-//
-// impl Stream for StealingStream {
-//     type Item = Vec<RecordBatch>;
-//
-//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//         loop {
-//             // Get the next available worker
-//             let steal_queue = match self.steal_queues.pop_front() {
-//                 Some(queue) => queue,
-//                 None => return Poll::Ready(None),
-//             };
-//
-//             match Self::pop_many(&steal_queue, 5) {
-//                 Ok(batches) => {
-//                     // Return the worker to the back of the queue
-//                     self.steal_queues.push_back(steal_queue);
-//                     return Poll::Ready(Some(batches));
-//                 },
-//                 // If the queue is empty, don't add it back to the list, and continue looping looking
-//                 // for things to steal
-//                 Err(_) => drop(steal_queue),
-//             }
-//         }
-//     }
-// }
+    (batches, receiver_state)
+}
 
 struct WorkStealingState {
     local_sender: flume::Sender<RecordBatch>,
@@ -354,8 +233,15 @@ impl ExecutionPlan for WorkStealingRepartitionExec {
                 {
                     let handle = tokio::task::spawn(async move {
                         // TODO forward errors
-                        let _ = consume_input(id, partition, input_stream, local_sender).await;
-                        ()
+                        match timeout(Duration::from_secs(20), consume_input(id, partition, input_stream, local_sender)).await {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(err)) => {
+                                eprintln!("Error consuming input: {}, (id {}, partition {})", err, id, partition);
+                            },
+                            Err(_) => {
+                                eprintln!("Possible deadlock while consuming input in work-stealing repartition, (id {}, partition {})", id, partition);
+                            }
+                        };
                     });
                     tasks_clone.lock().await.push(AbortOnDrop::new(handle));
 
@@ -380,12 +266,12 @@ impl ExecutionPlan for WorkStealingRepartitionExec {
                 // Create a stream of the contents of the local queue
                 Ok::<_, DataFusionError>(
                     futures::stream::once(async move {
-                        // println!("Output stream starting (id {}) {}", id, partition);
+                        // println!("Output stream starting (id {}, partition {})", id, partition);
                         futures::stream::empty()
                     }).flatten()
-                        .chain(make_flume_stream(local_receiver))
+                        .chain(make_flume_stream(local_receiver, id, partition))
                         .chain(futures::stream::once(async move {
-                            // println!("Local worker complete (id {}) {}", id, partition);
+                            // println!("Local worker complete (id {}, partition {})", id, partition);
                             futures::stream::empty()
                         }).flatten())
                         .chain(
@@ -393,7 +279,7 @@ impl ExecutionPlan for WorkStealingRepartitionExec {
                                 .flat_map(|vec| futures::stream::iter(vec))
                         )
                         .chain(futures::stream::once(async move {
-                            // println!("Stealing stream complete (id {}) {}", id, partition);
+                            // println!("Stealing stream complete (id {}, partition {})", id, partition);
                             futures::stream::empty()
                         }).flatten())
                         .map(|batch| Ok(batch))
@@ -476,20 +362,4 @@ fn create_shared_state(parallelism: usize) -> WorkStealingSharedState {
     WorkStealingSharedState {
         states,
     }
-}
-
-async fn consume_input(
-    id: usize,
-    partition: usize,
-    stream: SendableRecordBatchStream,
-    destination: flume::Sender<RecordBatch>,
-) -> Result<(), DataFusionError> {
-    // println!("Consume input starting (id {}) {}", id, partition);
-    stream.try_for_each(|batch| async {
-        destination.send_async(batch)
-            .await
-            .map_err(|_| DataFusionError::Internal("Failed to send batch".to_string()))
-    })
-        .await
-        .map_err(|e| DataFusionError::Internal("Failed to write batch to destination".to_string()))
 }

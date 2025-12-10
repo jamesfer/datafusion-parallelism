@@ -36,9 +36,9 @@ async fn main() {
     // register_tables(&session_state);
     // run_plan(&session_state).await;
 
-    let session_state = make_session_state(Some(JoinReplacement::New9));
+    let session_state = make_session_state(Some(JoinReplacement::New10));
     register_tables(&session_state);
-    for _ in 0..100 {
+    for _ in 0..10 {
         run_plan(&session_state).await;
     }
 }
@@ -90,9 +90,12 @@ fn register_tables(session_state: &SessionState) {
     let schema = Arc::new(MemorySchemaProvider::new());
 
     // Data
-    let batch_size = 1024;
+    let batch_size = 512;
+    let base_table_batch_count = 0;
+    let small_table_batch_count = 12000;
+
     let base_record_batches =
-        (0..10_000).into_iter()
+        (0..base_table_batch_count).into_iter()
             .map(|i| {
                 let i = i % 256;
                 RecordBatch::try_new(
@@ -103,23 +106,24 @@ fn register_tables(session_state: &SessionState) {
                         Arc::new(make_int_array_with_shift(i * batch_size, (i + 1) * batch_size, 1)),
                         Arc::new(make_int_array_with_shift(i * batch_size, (i + 1) * batch_size, 2)),
                         Arc::new(make_int_array_with_shift(i * batch_size, (i + 1) * batch_size, 3)),
-                        Arc::new(make_string_constant_array("hello".to_string(), 1024)),
+                        Arc::new(make_string_constant_array("hello".to_string(), batch_size)),
                         // Arc::new(make_string_array(std::iter::repeat_with(|| random_string(32)).take(batch_size as usize))),
                     ],
                 ).unwrap()
             })
             .collect::<Vec<_>>();
-    let base_table = StaticTable::new(base_table_schema, base_record_batches);
+    let base_table = StaticTable::new_with_row_count(base_table_schema, base_record_batches, 100_000_000);
     schema.register_table("base_table".to_string(), Arc::new(base_table)).unwrap();
 
     for table_number in 1..5 {
         let small_record_batches =
-            (0..256).into_iter()
+            (0..small_table_batch_count).into_iter()
                 .map(|i| {
                     RecordBatch::try_new(
                         small_table_schema.clone(),
                         vec![
-                            Arc::new(make_int_array_with_shift(i * batch_size, (i + 1) * batch_size, table_number)),
+                            // Arc::new(make_int_array_with_shift(i * batch_size, (i + 1) * batch_size, table_number)),
+                            Arc::new(make_int_array_with_shift(0, batch_size, table_number)),
                             Arc::new(make_string_array(std::iter::repeat_with(|| random_string(32)).take(batch_size as usize))),
                         ],
                     ).unwrap()
@@ -177,6 +181,12 @@ impl StaticTable {
             statistics,
             streaming_table: table,
         }
+    }
+
+    pub fn new_with_row_count(schema: SchemaRef, data: Vec<RecordBatch>, row_count: usize) -> Self {
+        let mut this = Self::new(schema.clone(), data.clone());
+        this.statistics.num_rows = Precision::Exact(row_count);
+        this
     }
 
     pub fn make_statistics(schema: &Schema, data: &Vec<RecordBatch>) -> Statistics {

@@ -74,10 +74,10 @@ pub struct ParallelHashJoinExecutor {
 }
 
 impl ParallelHashJoinExecutor {
-    pub fn new(parallelism: usize, build_implementation_version: JoinReplacement, join_type: JoinType) -> Self {
+    pub fn new(parallelism: usize, build_implementation_version: JoinReplacement, join_type: JoinType, input_schema: SchemaRef) -> Self {
         Self {
             // Create the build implementation based on the chosen replacement
-            build_implementation: Arc::new(BuildImplementation::new(build_implementation_version, parallelism)),
+            build_implementation: Arc::new(BuildImplementation::new(build_implementation_version, parallelism, input_schema)),
             // Create the probe lookup implementation based on the join type
             probe_lookup_implementation: Arc::new(ProbeLookupStreamImplementation::new(join_type, parallelism)),
         }

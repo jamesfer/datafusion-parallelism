@@ -145,7 +145,8 @@ impl ExecutionPlan for ParallelHashJoin {
             ParallelHashJoinExecutor::new(
                 parallelism,
                 self.build_implementation_version.clone(),
-                self.join_type.clone()
+                self.join_type.clone(),
+                self.left.schema(),
             )
         );
 

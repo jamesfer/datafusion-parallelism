@@ -1,9 +1,10 @@
 use std::fmt::Debug;
-
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion_common::DataFusionError;
 use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_plan::SendableRecordBatchStream;
 use crate::operator::lookup_consumers::{IndexLookupConsumer, IndexLookupProvider};
+use crate::operator::version10::build_implementation::Version10;
 use crate::parse_sql::JoinReplacement;
 
 use crate::operator::version1::build_implementation::Version1;
@@ -27,10 +28,11 @@ pub enum BuildImplementation {
     Version7(Version7),
     Version8(Version8),
     Version9(Version9),
+    Version10(Version10),
 }
 
 impl BuildImplementation {
-    pub fn new(build_implementation_version: JoinReplacement, parallelism: usize) -> Self {
+    pub fn new(build_implementation_version: JoinReplacement, parallelism: usize, input_schema: SchemaRef) -> Self {
         match build_implementation_version {
             JoinReplacement::Original => BuildImplementation::Version1(Version1::new(parallelism)),
             JoinReplacement::New => BuildImplementation::Version2(Version2::new(parallelism)),
@@ -41,6 +43,7 @@ impl BuildImplementation {
             JoinReplacement::New7 => BuildImplementation::Version7(Version7::new(parallelism)),
             JoinReplacement::New8 => BuildImplementation::Version8(Version8::new(parallelism)),
             JoinReplacement::New9 => BuildImplementation::Version9(Version9::new(parallelism)),
+            JoinReplacement::New10 => BuildImplementation::Version10(Version10::new(parallelism, input_schema)),
         }
     }
 
@@ -96,6 +99,11 @@ impl BuildImplementation {
                 build_expressions,
             ).await.map(|provider| provider.consume(consumer)),
             BuildImplementation::Version9(implementation) => implementation.build_lookup_map(
+                partition,
+                stream,
+                build_expressions,
+            ).await.map(|provider| provider.consume(consumer)),
+            BuildImplementation::Version10(implementation) => implementation.build_lookup_map(
                 partition,
                 stream,
                 build_expressions,

@@ -1,4 +1,4 @@
-use datafusion::common::Result;
+use datafusion::common::{Result, Statistics};
 use datafusion::dataframe::DataFrameWriteOptions;
 use datafusion::datasource::MemTable;
 use datafusion::physical_plan::displayable;
@@ -13,6 +13,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use datafusion::catalog::TableReference;
 use datafusion::error::DataFusionError;
 use datafusion::execution::context::SessionState;
 use datafusion::execution::runtime_env::RuntimeEnv;
@@ -34,6 +35,7 @@ arg_enum! {
         Version7,
         Version8,
         Version9,
+        Version10,
     }
 }
 
@@ -49,6 +51,7 @@ impl Into<datafusion_parallelism::parse_sql::JoinReplacement> for JoinReplacemen
             JoinReplacement::Version7 => datafusion_parallelism::parse_sql::JoinReplacement::New7,
             JoinReplacement::Version8 => datafusion_parallelism::parse_sql::JoinReplacement::New8,
             JoinReplacement::Version9 => datafusion_parallelism::parse_sql::JoinReplacement::New9,
+            JoinReplacement::Version10 => datafusion_parallelism::parse_sql::JoinReplacement::New10,
         }
     }
 }
@@ -368,9 +371,12 @@ pub async fn execute_query(
 
 async fn register_in_memory_table(ctx: &SessionContext, table_name: &str, path: &String, partitions: usize) -> Result<(), DataFusionError> {
     // Register the parquet table with a different suffix
-    // let parquet_table_name = table_name.to_string() + "_parquet";
-    // ctx.register_parquet(&parquet_table_name, path, ParquetReadOptions::default())
-    //     .await?;
+    let parquet_table_name = table_name.to_string() + "_parquet";
+    ctx.register_parquet(&parquet_table_name, path, ParquetReadOptions::default())
+        .await?;
+    let parquet_provider = ctx.table_provider(TableReference::bare(parquet_table_name)).await?;
+    let stats = parquet_provider.statistics();
+
 
     // Read the parquet data into memory
     let df = ctx.read_parquet(path, ParquetReadOptions::default()).await?;
@@ -383,8 +389,9 @@ async fn register_in_memory_table(ctx: &SessionContext, table_name: &str, path: 
     // Register the table in memory
     let rows = batches.iter().map(|b| b.num_rows()).sum::<usize>();
     let size = batches.iter().map(|b| b.get_array_memory_size()).sum::<usize>();
-    println!("Registering table {} in memory from {} (batches {}, rows {}, size {})", table_name, path, batches.len(), rows, size);
-    let table = StaticTable::new_with_parallelism(schema, batches, partitions);
+    println!("Registering table {} in memory from {} (batches {}, rows {}, size {}), parquet stats: {:?}", table_name, path, batches.len(), rows, size, stats);
+    let maybe_statistics = Some(Statistics::new_unknown(&schema));
+    let table = StaticTable::new_with_parallelism(schema, batches, partitions, maybe_statistics);
     ctx.register_table(table_name, Arc::new(table))?;
 
     Ok(())

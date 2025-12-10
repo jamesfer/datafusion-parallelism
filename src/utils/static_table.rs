@@ -56,8 +56,9 @@ impl StaticTable {
         schema: SchemaRef,
         data: Vec<RecordBatch>,
         parallelism: usize,
+        stats: Option<Statistics>,
     ) -> Self {
-        let statistics = Self::make_statistics(&schema, &data);
+        let statistics = stats.unwrap_or_else(|| Self::make_statistics(&schema, &data));
         let batches = (0..parallelism).into_iter()
             .map(|parallel_number| {
                 let records = data.iter()

@@ -1,5 +1,4 @@
-use std::future::Future;
-use tokio::sync::{AcquireError, Semaphore, SemaphorePermit};
+use tokio::sync::Semaphore;
 
 pub struct OnceNotify {
     semaphore: Semaphore,
