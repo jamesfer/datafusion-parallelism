@@ -280,8 +280,8 @@ main() {
     install_rust
     install_cloud_cli
     clone_repo
-    setup_data
     build_benchmark
+    setup_data
     run_benchmark
     upload_results
 

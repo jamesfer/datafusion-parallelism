@@ -1,0 +1,1019 @@
+==========================================
+BENCHMARK RUN FAILED
+==========================================
+Exit Code: 1
+Time: Wed Dec 10 22:19:08 UTC 2025
+Failed at line: 1
+
+Configuration:
+  Repository: jamesfer/datafusion-parallelism @ master
+  Data Source: gs://datafusion-parallelism-benchmark-data/tpch
+  Results Dest: gs://datafusion-parallelism-benchmark-data/results/1/
+  Iterations: 100
+  Scale Factor: 10
+  Query: 21
+  Join Version: default
+
+==========================================
+RECENT LOG OUTPUT (last 1000 lines):
+==========================================
+280 | |     ) -> Self {
+    | |_____________^ associated function `version6::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version6)`
+    |
+note: but type `version6::hash_lookup_builder::HashMapState` is only usable at visibility `pub(self)`
+   --> src/operator/version6/hash_lookup_builder.rs:242:1
+    |
+242 | struct HashMapState {
+    | ^^^^^^^^^^^^^^^^^^^
+
+warning: type `version6::hash_lookup_builder::PerformByLastOwner<Arc<version6::hash_lookup_builder::ReadOnlyJoinMapT<u64>>>` is more private than the item `version6::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version6/hash_lookup_builder.rs:268:5
+    |
+268 | /     pub fn new(
+269 | |         instance_number: usize,
+270 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+271 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+279 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+280 | |     ) -> Self {
+    | |_____________^ associated function `version6::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version6)`
+    |
+note: but type `version6::hash_lookup_builder::PerformByLastOwner<Arc<version6::hash_lookup_builder::ReadOnlyJoinMapT<u64>>>` is only usable at visibility `pub(self)`
+   --> src/operator/version6/hash_lookup_builder.rs:123:1
+    |
+123 | struct PerformByLastOwner<T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version6::hash_lookup_builder::OffsetTracker` is more private than the item `version6::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version6/hash_lookup_builder.rs:268:5
+    |
+268 | /     pub fn new(
+269 | |         instance_number: usize,
+270 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+271 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+279 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+280 | |     ) -> Self {
+    | |_____________^ associated function `version6::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version6)`
+    |
+note: but type `version6::hash_lookup_builder::OffsetTracker` is only usable at visibility `pub(self)`
+   --> src/operator/version6/hash_lookup_builder.rs:31:1
+    |
+ 31 | struct OffsetTracker {
+    | ^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version6::hash_lookup_builder::GlobalBuffer` is more private than the item `version6::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version6/hash_lookup_builder.rs:268:5
+    |
+268 | /     pub fn new(
+269 | |         instance_number: usize,
+270 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+271 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+279 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+280 | |     ) -> Self {
+    | |_____________^ associated function `version6::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version6)`
+    |
+note: but type `version6::hash_lookup_builder::GlobalBuffer` is only usable at visibility `pub(self)`
+   --> src/operator/version6/hash_lookup_builder.rs:492:1
+    |
+492 | struct GlobalBuffer {
+    | ^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::OffsetTracker` is more private than the item `version7::hash_lookup_builder::LocalAccumulator::new`
+  --> src/operator/version7/hash_lookup_builder.rs:78:5
+   |
+78 | /     pub fn new(
+79 | |         shard_count: usize,
+80 | |         batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
+81 | |         offset_tracker: Arc<OffsetTracker>,
+...  |
+84 | |         shared_compactor_constructor: SharedCompactorConstructor,
+85 | |     ) -> Self {
+   | |_____________^ associated function `version7::hash_lookup_builder::LocalAccumulator::new` is reachable at visibility `pub(in crate::operator::version7)`
+   |
+note: but type `version7::hash_lookup_builder::OffsetTracker` is only usable at visibility `pub(self)`
+  --> src/operator/version7/hash_lookup_builder.rs:30:1
+   |
+30 | struct OffsetTracker {
+   | ^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::HashMapState` is more private than the item `version7::hash_lookup_builder::LocalAccumulator::new`
+   --> src/operator/version7/hash_lookup_builder.rs:78:5
+    |
+ 78 | /     pub fn new(
+ 79 | |         shard_count: usize,
+ 80 | |         batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
+ 81 | |         offset_tracker: Arc<OffsetTracker>,
+...   |
+ 84 | |         shared_compactor_constructor: SharedCompactorConstructor,
+ 85 | |     ) -> Self {
+    | |_____________^ associated function `version7::hash_lookup_builder::LocalAccumulator::new` is reachable at visibility `pub(in crate::operator::version7)`
+    |
+note: but type `version7::hash_lookup_builder::HashMapState` is only usable at visibility `pub(self)`
+   --> src/operator/version7/hash_lookup_builder.rs:241:1
+    |
+241 | struct HashMapState {
+    | ^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::SharedCompactorConstructor` is more private than the item `version7::hash_lookup_builder::LocalAccumulator::new`
+   --> src/operator/version7/hash_lookup_builder.rs:78:5
+    |
+ 78 | /     pub fn new(
+ 79 | |         shard_count: usize,
+ 80 | |         batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
+ 81 | |         offset_tracker: Arc<OffsetTracker>,
+...   |
+ 84 | |         shared_compactor_constructor: SharedCompactorConstructor,
+ 85 | |     ) -> Self {
+    | |_____________^ associated function `version7::hash_lookup_builder::LocalAccumulator::new` is reachable at visibility `pub(in crate::operator::version7)`
+    |
+note: but type `version7::hash_lookup_builder::SharedCompactorConstructor` is only usable at visibility `pub(self)`
+   --> src/operator/version7/hash_lookup_builder.rs:179:1
+    |
+179 | struct SharedCompactorConstructor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::LocalShardEntry` is more private than the item `version7::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version7/hash_lookup_builder.rs:267:5
+    |
+267 | /     pub fn new(
+268 | |         instance_number: usize,
+269 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+270 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+278 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+279 | |     ) -> Self {
+    | |_____________^ associated function `version7::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version7)`
+    |
+note: but type `version7::hash_lookup_builder::LocalShardEntry` is only usable at visibility `pub(self)`
+   --> src/operator/version7/hash_lookup_builder.rs:60:1
+    |
+ 60 | struct LocalShardEntry {
+    | ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::EventuallyConsume<boxcar::Vec<(usize, datafusion::arrow::array::RecordBatch)>>` is more private than the item `version7::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version7/hash_lookup_builder.rs:267:5
+    |
+267 | /     pub fn new(
+268 | |         instance_number: usize,
+269 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+270 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+278 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+279 | |     ) -> Self {
+    | |_____________^ associated function `version7::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version7)`
+    |
+note: but type `version7::hash_lookup_builder::EventuallyConsume<boxcar::Vec<(usize, datafusion::arrow::array::RecordBatch)>>` is only usable at visibility `pub(self)`
+   --> src/operator/version7/hash_lookup_builder.rs:153:1
+    |
+153 | struct EventuallyConsume<T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::HashMapState` is more private than the item `version7::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version7/hash_lookup_builder.rs:267:5
+    |
+267 | /     pub fn new(
+268 | |         instance_number: usize,
+269 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+270 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+278 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+279 | |     ) -> Self {
+    | |_____________^ associated function `version7::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version7)`
+    |
+note: but type `version7::hash_lookup_builder::HashMapState` is only usable at visibility `pub(self)`
+   --> src/operator/version7/hash_lookup_builder.rs:241:1
+    |
+241 | struct HashMapState {
+    | ^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::PerformByLastOwner<Arc<version7::hash_lookup_builder::ReadOnlyJoinMapT<u64>>>` is more private than the item `version7::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version7/hash_lookup_builder.rs:267:5
+    |
+267 | /     pub fn new(
+268 | |         instance_number: usize,
+269 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+270 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+278 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+279 | |     ) -> Self {
+    | |_____________^ associated function `version7::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version7)`
+    |
+note: but type `version7::hash_lookup_builder::PerformByLastOwner<Arc<version7::hash_lookup_builder::ReadOnlyJoinMapT<u64>>>` is only usable at visibility `pub(self)`
+   --> src/operator/version7/hash_lookup_builder.rs:122:1
+    |
+122 | struct PerformByLastOwner<T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::OffsetTracker` is more private than the item `version7::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version7/hash_lookup_builder.rs:267:5
+    |
+267 | /     pub fn new(
+268 | |         instance_number: usize,
+269 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+270 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+278 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+279 | |     ) -> Self {
+    | |_____________^ associated function `version7::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version7)`
+    |
+note: but type `version7::hash_lookup_builder::OffsetTracker` is only usable at visibility `pub(self)`
+   --> src/operator/version7/hash_lookup_builder.rs:30:1
+    |
+ 30 | struct OffsetTracker {
+    | ^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version7::hash_lookup_builder::GlobalBuffer` is more private than the item `version7::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version7/hash_lookup_builder.rs:267:5
+    |
+267 | /     pub fn new(
+268 | |         instance_number: usize,
+269 | |         shared_shard_contents: LimitedRc<Vec<Vec<CachePadded<AtomicCell<Vec<LocalShardEntry>>>>>>,
+270 | |         local_shard_contents: Vec<Vec<LocalShardEntry>>,
+...   |
+278 | |         global_buffer_initializer: Arc<AsyncInitializeOnce<Arc<GlobalBuffer>>>,
+279 | |     ) -> Self {
+    | |_____________^ associated function `version7::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version7)`
+    |
+note: but type `version7::hash_lookup_builder::GlobalBuffer` is only usable at visibility `pub(self)`
+   --> src/operator/version7/hash_lookup_builder.rs:486:1
+    |
+486 | struct GlobalBuffer {
+    | ^^^^^^^^^^^^^^^^^^^
+
+warning: type `version8::hash_lookup_builder::OffsetTracker` is more private than the item `version8::hash_lookup_builder::LocalAccumulator::new`
+  --> src/operator/version8/hash_lookup_builder.rs:76:5
+   |
+76 | /     pub fn new(
+77 | |         shard_count: usize,
+78 | |         batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
+79 | |         offset_tracker: Arc<OffsetTracker>,
+80 | |         state: LimitedRc<HashMapState>,
+81 | |         shared_compactor_constructor: SharedCompactorConstructor,
+82 | |     ) -> Self {
+   | |_____________^ associated function `version8::hash_lookup_builder::LocalAccumulator::new` is reachable at visibility `pub(in crate::operator::version8)`
+   |
+note: but type `version8::hash_lookup_builder::OffsetTracker` is only usable at visibility `pub(self)`
+  --> src/operator/version8/hash_lookup_builder.rs:30:1
+   |
+30 | struct OffsetTracker {
+   | ^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version8::hash_lookup_builder::HashMapState` is more private than the item `version8::hash_lookup_builder::LocalAccumulator::new`
+   --> src/operator/version8/hash_lookup_builder.rs:76:5
+    |
+ 76 | /     pub fn new(
+ 77 | |         shard_count: usize,
+ 78 | |         batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
+ 79 | |         offset_tracker: Arc<OffsetTracker>,
+ 80 | |         state: LimitedRc<HashMapState>,
+ 81 | |         shared_compactor_constructor: SharedCompactorConstructor,
+ 82 | |     ) -> Self {
+    | |_____________^ associated function `version8::hash_lookup_builder::LocalAccumulator::new` is reachable at visibility `pub(in crate::operator::version8)`
+    |
+note: but type `version8::hash_lookup_builder::HashMapState` is only usable at visibility `pub(self)`
+   --> src/operator/version8/hash_lookup_builder.rs:233:1
+    |
+233 | struct HashMapState {
+    | ^^^^^^^^^^^^^^^^^^^
+
+warning: type `version8::hash_lookup_builder::SharedCompactorConstructor` is more private than the item `version8::hash_lookup_builder::LocalAccumulator::new`
+   --> src/operator/version8/hash_lookup_builder.rs:76:5
+    |
+ 76 | /     pub fn new(
+ 77 | |         shard_count: usize,
+ 78 | |         batch_list: LimitedRc<boxcar::Vec<(usize, RecordBatch)>>,
+ 79 | |         offset_tracker: Arc<OffsetTracker>,
+ 80 | |         state: LimitedRc<HashMapState>,
+ 81 | |         shared_compactor_constructor: SharedCompactorConstructor,
+ 82 | |     ) -> Self {
+    | |_____________^ associated function `version8::hash_lookup_builder::LocalAccumulator::new` is reachable at visibility `pub(in crate::operator::version8)`
+    |
+note: but type `version8::hash_lookup_builder::SharedCompactorConstructor` is only usable at visibility `pub(self)`
+   --> src/operator/version8/hash_lookup_builder.rs:171:1
+    |
+171 | struct SharedCompactorConstructor {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version8::hash_lookup_builder::LocalShardEntry` is more private than the item `version8::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version8/hash_lookup_builder.rs:259:5
+    |
+259 | /     pub fn new(
+260 | |         instance_number: usize,
+...   |
+271 | |         offset_tracker: Arc<OffsetTracker>,
+272 | |     ) -> Self {
+    | |_____________^ associated function `version8::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version8)`
+    |
+note: but type `version8::hash_lookup_builder::LocalShardEntry` is only usable at visibility `pub(self)`
+   --> src/operator/version8/hash_lookup_builder.rs:60:1
+    |
+ 60 | struct LocalShardEntry {
+    | ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version8::hash_lookup_builder::EventuallyConsume<boxcar::Vec<(usize, datafusion::arrow::array::RecordBatch)>>` is more private than the item `version8::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version8/hash_lookup_builder.rs:259:5
+    |
+259 | /     pub fn new(
+260 | |         instance_number: usize,
+...   |
+271 | |         offset_tracker: Arc<OffsetTracker>,
+272 | |     ) -> Self {
+    | |_____________^ associated function `version8::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version8)`
+    |
+note: but type `version8::hash_lookup_builder::EventuallyConsume<boxcar::Vec<(usize, datafusion::arrow::array::RecordBatch)>>` is only usable at visibility `pub(self)`
+   --> src/operator/version8/hash_lookup_builder.rs:145:1
+    |
+145 | struct EventuallyConsume<T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version8::hash_lookup_builder::HashMapState` is more private than the item `version8::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version8/hash_lookup_builder.rs:259:5
+    |
+259 | /     pub fn new(
+260 | |         instance_number: usize,
+...   |
+271 | |         offset_tracker: Arc<OffsetTracker>,
+272 | |     ) -> Self {
+    | |_____________^ associated function `version8::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version8)`
+    |
+note: but type `version8::hash_lookup_builder::HashMapState` is only usable at visibility `pub(self)`
+   --> src/operator/version8/hash_lookup_builder.rs:233:1
+    |
+233 | struct HashMapState {
+    | ^^^^^^^^^^^^^^^^^^^
+
+warning: type `version8::hash_lookup_builder::PerformByLastOwner<Arc<version8::hash_lookup_builder::ReadOnlyJoinMapU>>` is more private than the item `version8::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version8/hash_lookup_builder.rs:259:5
+    |
+259 | /     pub fn new(
+260 | |         instance_number: usize,
+...   |
+271 | |         offset_tracker: Arc<OffsetTracker>,
+272 | |     ) -> Self {
+    | |_____________^ associated function `version8::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version8)`
+    |
+note: but type `version8::hash_lookup_builder::PerformByLastOwner<Arc<version8::hash_lookup_builder::ReadOnlyJoinMapU>>` is only usable at visibility `pub(self)`
+   --> src/operator/version8/hash_lookup_builder.rs:114:1
+    |
+114 | struct PerformByLastOwner<T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `version8::hash_lookup_builder::OffsetTracker` is more private than the item `version8::hash_lookup_builder::SharedCompactor::new`
+   --> src/operator/version8/hash_lookup_builder.rs:259:5
+    |
+259 | /     pub fn new(
+260 | |         instance_number: usize,
+...   |
+271 | |         offset_tracker: Arc<OffsetTracker>,
+272 | |     ) -> Self {
+    | |_____________^ associated function `version8::hash_lookup_builder::SharedCompactor::new` is reachable at visibility `pub(in crate::operator::version8)`
+    |
+note: but type `version8::hash_lookup_builder::OffsetTracker` is only usable at visibility `pub(self)`
+   --> src/operator/version8/hash_lookup_builder.rs:30:1
+    |
+ 30 | struct OffsetTracker {
+    | ^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `get_overflow` and `get_entries` are never used
+   --> src/utils/concurrent_join_map.rs:194:8
+    |
+167 | / impl <T> ReadOnlyJoinMap<T>
+168 | | where T: Eq + Hash + Clone {
+    | |__________________________- methods in this implementation
+...
+194 |       fn get_overflow(&self) -> &Vec<usize> {
+    |          ^^^^^^^^^^^^
+...
+198 |       fn get_entries(&self) -> Vec<(&T, &usize)> {
+    |          ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `PerformOnce` is never constructed
+ --> src/utils/perform_once.rs:3:12
+  |
+3 | pub struct PerformOnce {
+  |            ^^^^^^^^^^^
+
+warning: associated items `new` and `run_once` are never used
+  --> src/utils/perform_once.rs:8:12
+   |
+ 7 | impl PerformOnce {
+   | ---------------- associated items in this implementation
+ 8 |     pub fn new() -> Self {
+   |            ^^^
+...
+12 |     pub fn run_once<F, T>(&self, operation: F) -> Result<T, ()>
+   |            ^^^^^^^^
+
+warning: associated function `new` is never used
+  --> src/utils/chain_afterwards.rs:23:19
+   |
+18 | / impl<St1, St2> ChainAfterwards<St1, St2>
+19 | |     where
+20 | |         St1: Stream,
+21 | |         St2: Stream<Item = St1::Item>,
+   | |______________________________________- associated function in this implementation
+22 |   {
+23 |       pub(super) fn new(stream1: St1, stream2: St2) -> Self {
+   |                     ^^^
+
+warning: methods `get_overflow` and `get_entries` are never used
+   --> src/utils/concurrent_self_hash_join_map.rs:186:8
+    |
+160 | impl ReadOnlyJoinMap {
+    | -------------------- methods in this implementation
+...
+186 |     fn get_overflow(&self) -> &Vec<usize> {
+    |        ^^^^^^^^^^^^
+...
+190 |     fn get_entries(&self) -> Vec<(&u64, &usize)> {
+    |        ^^^^^^^^^^^
+
+warning: trait `ContainsHash` is never used
+ --> src/utils/bypass_hasher.rs:4:11
+  |
+4 | pub trait ContainsHash {
+  |           ^^^^^^^^^^^^
+
+warning: struct `ContainsHashWrapper` is never constructed
+ --> src/utils/bypass_hasher.rs:8:8
+  |
+8 | struct ContainsHashWrapper<K: ContainsHash> {
+  |        ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `WithHash` is never constructed
+  --> src/utils/bypass_hasher.rs:18:12
+   |
+18 | pub struct WithHash<T> {
+   |            ^^^^^^^^
+
+warning: associated function `new` is never used
+  --> src/utils/bypass_hasher.rs:24:12
+   |
+23 | impl<T> WithHash<T> {
+   | ------------------- associated function in this implementation
+24 |     pub fn new(inner: T, hash: u64) -> Self {
+   |            ^^^
+
+warning: struct `QueueWriter` is never constructed
+  --> src/utils/concurrent_queued_self_hash_join_map.rs:99:8
+   |
+99 | struct QueueWriter<'a> {
+   |        ^^^^^^^^^^^
+
+warning: method `write` is never used
+   --> src/utils/concurrent_queued_self_hash_join_map.rs:106:12
+    |
+105 | impl <'a> QueueWriter<'a> {
+    | ------------------------- method in this implementation
+106 |     pub fn write(&mut self, shard_number: usize, chunk: QueuedChunk) {
+    |            ^^^^^
+
+warning: methods `get_overflow` and `get_entries` are never used
+   --> src/utils/concurrent_queued_self_hash_join_map.rs:467:8
+    |
+441 | impl ReadOnlyJoinMap {
+    | -------------------- methods in this implementation
+...
+467 |     fn get_overflow(&self) -> &Vec<usize> {
+    |        ^^^^^^^^^^^^
+...
+471 |     fn get_entries(&self) -> Vec<(&u64, &usize)> {
+    |        ^^^^^^^^^^^
+
+warning: field `parallelism` is never read
+  --> src/operator/probe_lookup_implementation/full.rs:24:5
+   |
+23 | pub struct FullJoinProbeLookupStream {
+   |            ------------------------- field in this struct
+24 |     parallelism: usize,
+   |     ^^^^^^^^^^^
+   |
+   = note: `FullJoinProbeLookupStream` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `parallelism` is never read
+  --> src/operator/probe_lookup_implementation/inner.rs:22:5
+   |
+21 | pub struct InnerJoinProbeLookupStream {
+   |            -------------------------- field in this struct
+22 |     parallelism: usize,
+   |     ^^^^^^^^^^^
+   |
+   = note: `InnerJoinProbeLookupStream` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `parallelism` is never read
+  --> src/operator/probe_lookup_implementation/right_outer.rs:18:5
+   |
+17 | pub struct RightOuterProbeLookupStream {
+   |            --------------------------- field in this struct
+18 |     parallelism: usize,
+   |     ^^^^^^^^^^^
+   |
+   = note: `RightOuterProbeLookupStream` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `parallelism` is never read
+  --> src/operator/probe_lookup_implementation/right_semi.rs:18:5
+   |
+17 | pub struct RightSemiProbeLookupStream {
+   |            -------------------------- field in this struct
+18 |     parallelism: usize,
+   |     ^^^^^^^^^^^
+   |
+   = note: `RightSemiProbeLookupStream` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `parallelism` is never read
+  --> src/operator/probe_lookup_implementation/right_anti.rs:18:5
+   |
+17 | pub struct RightAntiProbeLookupStream {
+   |            -------------------------- field in this struct
+18 |     parallelism: usize,
+   |     ^^^^^^^^^^^
+   |
+   = note: `RightAntiProbeLookupStream` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `parallelism` is never read
+  --> src/operator/probe_lookup_implementation/left_semi.rs:24:5
+   |
+23 | pub struct LeftSemiProbeLookupStream {
+   |            ------------------------- field in this struct
+24 |     parallelism: usize,
+   |     ^^^^^^^^^^^
+   |
+   = note: `LeftSemiProbeLookupStream` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `parallelism` is never read
+  --> src/operator/probe_lookup_implementation/left_anti.rs:24:5
+   |
+23 | pub struct LeftAntiProbeLookupStream {
+   |            ------------------------- field in this struct
+24 |     parallelism: usize,
+   |     ^^^^^^^^^^^
+   |
+   = note: `LeftAntiProbeLookupStream` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `parallelism` is never read
+  --> src/operator/probe_lookup_implementation/left_outer.rs:25:5
+   |
+24 | pub struct LeftOuterProbeLookupStream {
+   |            -------------------------- field in this struct
+25 |     parallelism: usize,
+   |     ^^^^^^^^^^^
+   |
+   = note: `LeftOuterProbeLookupStream` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: function `compact_join_map` is never used
+  --> src/operator/version4/build_implementation.rs:80:10
+   |
+80 | async fn compact_join_map(
+   |          ^^^^^^^^^^^^^^^^
+
+warning: function `compact_batches` is never used
+   --> src/operator/version4/build_implementation.rs:124:4
+    |
+124 | fn compact_batches(input_schema: &SchemaRef, batch_list: &boxcar::Vec<(usize, RecordBatch)>) -> Result<RecordBatch, DataFusionError> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: field `reference_map` is never read
+  --> src/operator/version4/hash_lookup_builder.rs:64:5
+   |
+62 | pub struct LocalAccumulator {
+   |            ---------------- field in this struct
+63 |     local_shard_contents: Vec<Vec<LocalShardEntry>>,
+64 |     reference_map: DashMap<(), ()>,
+   |     ^^^^^^^^^^^^^
+
+warning: function `compact_join_map` is never used
+  --> src/operator/version5/inner_hash_join.rs:80:10
+   |
+80 | async fn compact_join_map(
+   |          ^^^^^^^^^^^^^^^^
+
+warning: function `compact_batches` is never used
+   --> src/operator/version5/inner_hash_join.rs:124:4
+    |
+124 | fn compact_batches(input_schema: &SchemaRef, batch_list: &boxcar::Vec<(usize, RecordBatch)>) -> Result<RecordBatch, DataFusionError> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: field `reference_map` is never read
+  --> src/operator/version5/hash_lookup_builder.rs:70:5
+   |
+68 | pub struct LocalAccumulator {
+   |            ---------------- field in this struct
+69 |     local_shard_contents: Vec<Vec<LocalShardEntry>>,
+70 |     reference_map: DashMap<(), ()>,
+   |     ^^^^^^^^^^^^^
+
+warning: struct `UnsafeCellSendWrapper` is never constructed
+   --> src/operator/version5/hash_lookup_builder.rs:511:8
+    |
+511 | struct UnsafeCellSendWrapper<T> {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+   --> src/operator/version5/hash_lookup_builder.rs:519:12
+    |
+518 | impl <T> UnsafeCellSendWrapper<T> {
+    | --------------------------------- associated function in this implementation
+519 |     pub fn new(cell: UnsafeCell<T>) -> Self {
+    |            ^^^
+
+warning: fields `shift` and `hasher` are never read
+   --> src/operator/version5/hash_lookup_builder.rs:534:5
+    |
+533 | pub struct ReadOnlyJoinMap {
+    |            --------------- fields in this struct
+534 |     shift: usize,
+    |     ^^^^^
+535 |     hasher: RandomState,
+    |     ^^^^^^
+
+warning: method `determine_shard` is never used
+   --> src/operator/version5/hash_lookup_builder.rs:555:8
+    |
+540 | impl ReadOnlyJoinMap {
+    | -------------------- method in this implementation
+...
+555 |     fn determine_shard(&self, hash: usize) -> usize {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `transpose` is never used
+   --> src/operator/version5/hash_lookup_builder.rs:673:4
+    |
+673 | fn transpose<T>(input: Vec<Vec<T>>) -> Vec<Vec<T>> {
+    |    ^^^^^^^^^
+
+warning: function `compact_join_map` is never used
+  --> src/operator/version6/inner_hash_join.rs:80:10
+   |
+80 | async fn compact_join_map(
+   |          ^^^^^^^^^^^^^^^^
+
+warning: function `compact_batches` is never used
+   --> src/operator/version6/inner_hash_join.rs:124:4
+    |
+124 | fn compact_batches(input_schema: &SchemaRef, batch_list: &boxcar::Vec<(usize, RecordBatch)>) -> Result<RecordBatch, DataFusionError> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: field `reference_map` is never read
+  --> src/operator/version6/hash_lookup_builder.rs:70:5
+   |
+68 | pub struct LocalAccumulator {
+   |            ---------------- field in this struct
+69 |     local_shard_contents: Vec<Vec<LocalShardEntry>>,
+70 |     reference_map: DashMap<(), ()>,
+   |     ^^^^^^^^^^^^^
+
+warning: method `get` is never used
+   --> src/operator/version6/hash_lookup_builder.rs:507:12
+    |
+496 | impl GlobalBuffer {
+    | ----------------- method in this implementation
+...
+507 |     pub fn get(&self, index: usize) -> usize {
+    |            ^^^
+
+warning: function `transpose` is never used
+   --> src/operator/version6/hash_lookup_builder.rs:742:4
+    |
+742 | fn transpose<T>(input: Vec<Vec<T>>) -> Vec<Vec<T>> {
+    |    ^^^^^^^^^
+
+warning: function `compact_join_map` is never used
+  --> src/operator/version7/inner_hash_join.rs:80:10
+   |
+80 | async fn compact_join_map(
+   |          ^^^^^^^^^^^^^^^^
+
+warning: function `compact_batches` is never used
+   --> src/operator/version7/inner_hash_join.rs:124:4
+    |
+124 | fn compact_batches(input_schema: &SchemaRef, batch_list: &boxcar::Vec<(usize, RecordBatch)>) -> Result<RecordBatch, DataFusionError> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: field `reference_map` is never read
+  --> src/operator/version7/hash_lookup_builder.rs:69:5
+   |
+67 | pub struct LocalAccumulator {
+   |            ---------------- field in this struct
+68 |     local_shard_contents: Vec<Vec<LocalShardEntry>>,
+69 |     reference_map: DashMap<(), ()>,
+   |     ^^^^^^^^^^^^^
+
+warning: field `vec` is never read
+   --> src/operator/version7/hash_lookup_builder.rs:487:5
+    |
+486 | struct GlobalBuffer {
+    |        ------------ field in this struct
+487 |     vec: Vec<AtomicUsize>
+    |     ^^^
+
+warning: methods `set`, `get`, and `to_vec` are never used
+   --> src/operator/version7/hash_lookup_builder.rs:497:12
+    |
+490 | impl GlobalBuffer {
+    | ----------------- methods in this implementation
+...
+497 |     pub fn set(&self, index: usize, value: usize) {
+    |            ^^^
+...
+501 |     pub fn get(&self, index: usize) -> usize {
+    |            ^^^
+...
+505 |     pub fn to_vec(&self) -> Vec<usize> {
+    |            ^^^^^^
+
+warning: struct `UnsafeCellSendWrapper` is never constructed
+   --> src/operator/version7/hash_lookup_builder.rs:512:8
+    |
+512 | struct UnsafeCellSendWrapper<T> {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+   --> src/operator/version7/hash_lookup_builder.rs:520:12
+    |
+519 | impl <T> UnsafeCellSendWrapper<T> {
+    | --------------------------------- associated function in this implementation
+520 |     pub fn new(cell: UnsafeCell<T>) -> Self {
+    |            ^^^
+
+warning: function `transpose` is never used
+   --> src/operator/version7/hash_lookup_builder.rs:760:4
+    |
+760 | fn transpose<T>(input: Vec<Vec<T>>) -> Vec<Vec<T>> {
+    |    ^^^^^^^^^
+
+warning: function `compact_join_map` is never used
+  --> src/operator/version8/build_implementation.rs:80:10
+   |
+80 | async fn compact_join_map(
+   |          ^^^^^^^^^^^^^^^^
+
+warning: function `compact_batches` is never used
+   --> src/operator/version8/build_implementation.rs:124:4
+    |
+124 | fn compact_batches(input_schema: &SchemaRef, batch_list: &boxcar::Vec<(usize, RecordBatch)>) -> Result<RecordBatch, DataFusionError> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: function `transpose` is never used
+   --> src/operator/version8/hash_lookup_builder.rs:628:4
+    |
+628 | fn transpose<T>(input: Vec<Vec<T>>) -> Vec<Vec<T>> {
+    |    ^^^^^^^^^
+
+warning: constant `N` is never used
+  --> src/operator/version10/new_map_3/fixed_table.rs:13:7
+   |
+13 | const N: usize = 8;
+   |       ^
+
+warning: constant `OVERFLOW_BIT_MASK` is never used
+  --> src/operator/version10/new_map_3/fixed_table.rs:54:7
+   |
+54 | const OVERFLOW_BIT_MASK: u64 = 1 << 63;
+   |       ^^^^^^^^^^^^^^^^^
+
+warning: constant `TOP_8_BITS_MASK` is never used
+  --> src/operator/version10/new_map_3/fixed_table.rs:55:7
+   |
+55 | const TOP_8_BITS_MASK: u64 = u64::MAX << 56;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `LESS_15` is never used
+  --> src/operator/version10/new_map_3/fixed_table.rs:56:7
+   |
+56 | const LESS_15: u64 = OVERFLOW_BIT_MASK - 15;
+   |       ^^^^^^^
+
+warning: constant `IGNORE_TOP_7_MASK` is never used
+  --> src/operator/version10/new_map_3/fixed_table.rs:57:7
+   |
+57 | const IGNORE_TOP_7_MASK: u64 = 0x1FFF_FFFF_FFFF_FFFF;
+   |       ^^^^^^^^^^^^^^^^^
+
+warning: constant `IGNORE_TOP_8_MASK` is never used
+  --> src/operator/version10/new_map_3/fixed_table.rs:58:7
+   |
+58 | const IGNORE_TOP_8_MASK: u64 = 0x0FFF_FFFF_FFFF_FFFF;
+   |       ^^^^^^^^^^^^^^^^^
+
+warning: methods `get_in_bulk_4` and `max_insert_attempts` are never used
+   --> src/operator/version10/new_map_3/fixed_table.rs:385:19
+    |
+107 | / impl <V, G> Inner<V, G>
+108 | | where
+109 | |     V: AsAtomic + Default + PartialEq + Clone,
+110 | |     G: GroupStrategy
+    | |____________________- methods in this implementation
+...
+385 |       pub unsafe fn get_in_bulk_4(&self, hashes: [&u64; 256]) -> Vec<Option<&V>> {
+    |                     ^^^^^^^^^^^^^
+...
+675 |       pub fn max_insert_attempts(&mut self) -> usize {
+    |              ^^^^^^^^^^^^^^^^^^^
+
+warning: field `size` is never read
+   --> src/operator/version10/new_map_3/fixed_table.rs:995:5
+    |
+994 | pub struct WritableFixedTable<V, G> {
+    |            ------------------ field in this struct
+995 |     size: AtomicU32,
+    |     ^^^^
+
+warning: fields `writes_to_current_table` and `time_wasted_due_to_full_table` are never read
+   --> src/operator/version10/new_map_3/new_map_3.rs:136:5
+    |
+133 | pub struct WriteOnlyTable<V> {
+    |            -------------- fields in this struct
+...
+136 |     writes_to_current_table: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+...
+142 |     time_wasted_due_to_full_table: u64,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `WriteOnlyTable` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: constant `SIZE_OK` is never used
+   --> src/operator/version10/new_map_3/iterable_bit_mask.rs:290:15
+    |
+290 |         const SIZE_OK: () = assert!(size_of::<IterableBitMaskIntrinsics8x8>() == size_of::<u64>());
+    |               ^^^^^^^
+
+warning: constant `SIZE_OK` is never used
+   --> src/operator/version10/new_map_3/iterable_bit_mask.rs:373:15
+    |
+373 |         const SIZE_OK: () = assert!(size_of::<IterableBitMaskIntrinsics8x4>() == size_of::<u32>());
+    |               ^^^^^^^
+
+warning: function `interleave_x4` is never used
+   --> src/operator/version10/new_map_3/group.rs:293:11
+    |
+293 | unsafe fn interleave_x4(search_tags: [u8; 4]) -> aarch64::uint8x16_t {
+    |           ^^^^^^^^^^^^^
+
+warning: function `interleave_x4_b` is never used
+   --> src/operator/version10/new_map_3/group.rs:302:11
+    |
+302 | unsafe fn interleave_x4_b(search_tags: &[u8; 4]) -> aarch64::uint8x16_t {
+    |           ^^^^^^^^^^^^^^^
+
+warning: function `interleave_x4_c` is never used
+   --> src/operator/version10/new_map_3/group.rs:335:11
+    |
+335 | unsafe fn interleave_x4_c(search_tags: [u8; 4]) -> aarch64::uint8x16_t {
+    |           ^^^^^^^^^^^^^^^
+
+warning: function `const_inner_match_loop` is never used
+ --> src/operator/version10/new_map_3/const_group_iterator.rs:2:8
+  |
+2 | pub fn const_inner_match_loop<'a, const N: u8, F, V>(search_hash: u64, base_index: usize, capacity_mask: usize, mut get_item: F) -> O...
+  |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `dispatch_const_inner_match_loop` is never used
+  --> src/operator/version10/new_map_3/const_group_iterator.rs:20:8
+   |
+20 | pub fn dispatch_const_inner_match_loop<'a, F, V>(match_result: u8, search_hash: u64, base_index: usize, capacity_mask: usize, get_it...
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `PrintOnDrop` is never constructed
+   --> src/operator/work_stealing_repartition_exec.rs:298:8
+    |
+298 | struct PrintOnDrop {
+    |        ^^^^^^^^^^^
+
+warning: field `abort_helper` is never read
+   --> src/operator/work_stealing_repartition_exec.rs:310:5
+    |
+308 | struct TempStream<S> {
+    |        ---------- field in this struct
+309 |     stream: Pin<Box<RecordBatchStreamAdapter<S>>>,
+310 |     abort_helper: Arc<Mutex<Vec<AbortOnDrop<()>>>>,
+    |     ^^^^^^^^^^^^
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/utils/concurrent_join_map.rs:239:36
+    |
+239 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator {
+    |                                    ^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                    |
+    |                                    the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+239 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator<'_> {
+    |                                                                        ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/utils/partitioned_concurrent_join_map.rs:325:63
+    |
+325 |     fn new(local_index: usize, global_index: usize, overflow: &[(usize, usize)]) -> ReadOnlyJoinMapIterator {
+    |                                                               ^^^^^^^^^^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                                               |
+    |                                                               the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+325 |     fn new(local_index: usize, global_index: usize, overflow: &[(usize, usize)]) -> ReadOnlyJoinMapIterator<'_> {
+    |                                                                                                            ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/utils/concurrent_self_hash_join_map.rs:229:36
+    |
+229 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator {
+    |                                    ^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                    |
+    |                                    the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+229 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator<'_> {
+    |                                                                        ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/utils/partitioned_concurrent_self_hash_join_map.rs:319:63
+    |
+319 |     fn new(local_index: usize, global_index: usize, overflow: &[(usize, usize)]) -> ReadOnlyJoinMapIterator {
+    |                                                               ^^^^^^^^^^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                                               |
+    |                                                               the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+319 |     fn new(local_index: usize, global_index: usize, overflow: &[(usize, usize)]) -> ReadOnlyJoinMapIterator<'_> {
+    |                                                                                                            ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/utils/concurrent_queued_self_hash_join_map.rs:510:36
+    |
+510 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator {
+    |                                    ^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                    |
+    |                                    the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+510 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator<'_> {
+    |                                                                        ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/operator/version6/hash_lookup_builder.rs:573:36
+    |
+573 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator {
+    |                                    ^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                    |
+    |                                    the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+573 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator<'_> {
+    |                                                                        ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/operator/version7/hash_lookup_builder.rs:590:36
+    |
+590 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator {
+    |                                    ^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                    |
+    |                                    the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+590 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator<'_> {
+    |                                                                        ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/operator/version8/hash_lookup_builder.rs:526:36
+    |
+526 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator {
+    |                                    ^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                    |
+    |                                    the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+526 |     fn new(index: usize, overflow: &[usize]) -> ReadOnlyJoinMapIterator<'_> {
+    |                                                                        ++++
+
+warning: `datafusion-parallelism` (lib) generated 301 warnings (run `cargo fix --lib -p datafusion-parallelism` to apply 150 suggestions)
+    Finished `release` profile [optimized] target(s) in 0.10s
+     Running `/root/datafusion-parallelism/target/release/tpc --data-path ./data --output ./output --query-path ./datafusion-benchmarks/tpch/queries --iterations 100 --query 21`
+Setup time was 0 ms
+Executing query 21 from ./datafusion-benchmarks/tpch/queries/q21.sql
+Error: Plan("table 'datafusion.public.supplier' not found")
+
+============================================
+ERROR: Script failed with exit code 1
+============================================
+
