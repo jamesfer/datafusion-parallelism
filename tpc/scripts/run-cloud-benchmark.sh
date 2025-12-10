@@ -313,6 +313,18 @@ echo ""
 echo "==> Results downloaded successfully"
 echo ""
 
+# Check for errors first
+if [[ -f "$LOCAL_RESULTS_DIR/ERROR.txt" ]]; then
+    echo "=========================================="
+    echo "WARNING: BENCHMARK RUN FAILED"
+    echo "=========================================="
+    echo ""
+    cat "$LOCAL_RESULTS_DIR/ERROR.txt"
+    echo ""
+    echo "=========================================="
+    exit 1
+fi
+
 # Display results summary if available
 if [[ -f "$LOCAL_RESULTS_DIR/results.csv" ]]; then
     echo "==> Results Summary:"

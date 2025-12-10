@@ -7,6 +7,65 @@ set -euo pipefail
 # Set HOME if not set (happens when running as startup script)
 export HOME="${HOME:-/root}"
 
+# Track if we had an error
+ERROR_OCCURRED=false
+
+# Trap to ensure shutdown on error or completion
+trap 'handle_exit' EXIT
+
+# Handle script exit (success or error)
+handle_exit() {
+    local exit_code=$?
+
+    if [ $exit_code -ne 0 ]; then
+        ERROR_OCCURRED=true
+        echo ""
+        echo "============================================"
+        echo "ERROR: Script failed with exit code $exit_code"
+        echo "============================================"
+        echo ""
+
+        # Create error report
+        ERROR_LOG="/tmp/error-report.txt"
+        {
+            echo "=========================================="
+            echo "BENCHMARK RUN FAILED"
+            echo "=========================================="
+            echo "Exit Code: $exit_code"
+            echo "Time: $(date)"
+            echo "Failed at line: ${BASH_LINENO[0]}"
+            echo ""
+            echo "Configuration:"
+            echo "  Repository: $REPO @ $REPO_BRANCH"
+            echo "  Data Source: ${DATA_SOURCE:-<none>}"
+            echo "  Results Dest: ${RESULTS_DEST:-<none>}"
+            echo "  Iterations: $ITERATIONS"
+            echo "  Scale Factor: $SCALE_FACTOR"
+            echo "  Query: ${QUERY:-all queries}"
+            echo "  Join Version: ${JOIN_VERSION:-default}"
+            echo ""
+            echo "=========================================="
+            echo "RECENT LOG OUTPUT (last 1000 lines):"
+            echo "=========================================="
+            tail -1000 /var/log/benchmark.log 2>/dev/null || echo "No benchmark log found"
+        } > "$ERROR_LOG"
+
+        # Upload error log if RESULTS_DEST is set
+        if [[ -n "$RESULTS_DEST" ]]; then
+            echo "==> Uploading error report to ${RESULTS_DEST}/ERROR.txt"
+            if [[ "$RESULTS_DEST" == s3://* ]]; then
+                aws s3 cp "$ERROR_LOG" "${RESULTS_DEST}/ERROR.txt" || true
+            elif [[ "$RESULTS_DEST" == gs://* ]]; then
+                gcloud storage cp "$ERROR_LOG" "${RESULTS_DEST}/ERROR.txt" || true
+            fi
+        fi
+
+        cat "$ERROR_LOG"
+    fi
+
+    shutdown_instance
+}
+
 # Configuration via environment variables with defaults
 REPO="${REPO:-jamesfer/datafusion-parallelism}"
 REPO_BRANCH="${REPO_BRANCH:-master}"
@@ -95,7 +154,7 @@ install_cloud_cli() {
 clone_repo() {
     echo "==> Cloning repository..."
     cd "$HOME"
-    git clone -b "$REPO_BRANCH" "https://github.com/${REPO}.git" datafusion-parallelism
+    git clone --recurse-submodules -b "$REPO_BRANCH" "https://github.com/${REPO}.git" datafusion-parallelism
     cd datafusion-parallelism/tpc
     echo "==> Repository cloned to ~/datafusion-parallelism"
 }
@@ -150,7 +209,7 @@ run_benchmark() {
     CMD="cargo run --release --"
     CMD="$CMD --data-path ./data"
     CMD="$CMD --output ./output"
-    CMD="$CMD --query-path ./queries"
+    CMD="$CMD --query-path ./datafusion-benchmarks/tpch/queries"
     CMD="$CMD --iterations $ITERATIONS"
 
     # Only add join version if specified
