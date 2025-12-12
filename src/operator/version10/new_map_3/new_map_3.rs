@@ -84,6 +84,7 @@ where V: Default + Copy + AsAtomic + PartialEq + 'static
             let source_table = &compaction_elements.source_tables[source_table_index];
 
             let mut count = 0;
+            // TODO should use a read only table at this point
             for (entry_index, pair) in source_table.entries().enumerate() {
                 // Only take entries from our current partition. This could be done more efficiently
                 // by using a partitioned iterator

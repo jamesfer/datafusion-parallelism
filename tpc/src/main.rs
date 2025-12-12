@@ -353,6 +353,12 @@ pub async fn execute_query(
                     println!("{}", formatted_query_plan);
                 }
 
+                let physical_plan = df.clone().create_physical_plan().await?;
+                let formatted_physical_plan = format!("{}", displayable(physical_plan.as_ref()).indent(false));
+                if debug {
+                    println!("{}", formatted_physical_plan);
+                }
+
                 let exec = df.create_physical_plan().await?;
                 if debug {
                     println!("{}", displayable(exec.as_ref()).indent(false));
@@ -364,6 +370,13 @@ pub async fn execute_query(
                 );
                 let mut file = File::create(&filename)?;
                 write!(file, "{}", formatted_query_plan)?;
+
+                let filename = format!(
+                    "{}/q{}{}_physical_plan.txt",
+                    output_path, query_no, file_suffix
+                );
+                let mut file = File::create(&filename)?;
+                write!(file, "{}", formatted_physical_plan)?;
 
                 // write results to disk
                 if batches.is_empty() {

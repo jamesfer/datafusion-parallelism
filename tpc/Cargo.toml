@@ -8,6 +8,10 @@ autobenches = false
 name = "tpc"
 path = "src/main.rs"
 
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+
 [dependencies]
 datafusion = "40.0.0"
 serde = { version = "1.0.203", features = ["derive"] }

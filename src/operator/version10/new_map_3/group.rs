@@ -467,7 +467,6 @@ impl Group8 {
 
     #[inline(always)]
     pub unsafe fn load_ptr(tags: *const u8) -> Self {
-        let x = [0u8; 8];
         Self(aarch64::vld1_u8(tags))
     }
 

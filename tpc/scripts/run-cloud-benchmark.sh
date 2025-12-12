@@ -305,6 +305,10 @@ while true; do
 done
 
 echo ""
+echo "==> Deleting instance..."
+gcloud compute instances delete "$INSTANCE_NAME" --zone="$ZONE" --quiet 2>/dev/null || echo "Instance already deleted or not found"
+
+echo ""
 echo "==> Downloading results from $RESULTS_DEST to $LOCAL_RESULTS_DIR..."
 mkdir -p "$LOCAL_RESULTS_DIR"
 gcloud storage rsync --recursive "$RESULTS_DEST" "$LOCAL_RESULTS_DIR"

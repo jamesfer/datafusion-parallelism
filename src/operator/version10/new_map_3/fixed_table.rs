@@ -1368,12 +1368,15 @@ mod tests {
     #[test]
     fn write_returns_err_when_table_is_full() {
         let table = WritableFixedTable::<usize, Group16>::with_capacity(64);
-        let mut hashes = [0u64; 64];
+        // Due to headroom, the capacity actually grows to 128
+        assert_eq!(table.capacity, 128);
+
+        let mut hashes = [0u64; 128];
         let mut rng = StdRng::seed_from_u64(123);
         rng.fill(&mut hashes[..]);
 
         for hash in hashes {
-            table.insert(hash, hash as usize).unwrap();
+            assert_eq!(table.insert(hash, hash as usize).unwrap(), None);
         }
 
         assert_eq!(table.insert(1, 1), Err(()));
@@ -1680,7 +1683,10 @@ mod tests8 {
     #[test]
     fn write_returns_err_when_table_is_full() {
         let table = WritableFixedTable::<usize, Group8>::with_capacity(64);
-        let mut hashes = [0u64; 64];
+        // Due to headroom, the capacity actually grows to 128
+        assert_eq!(table.capacity, 128);
+
+        let mut hashes = [0u64; 128];
         let mut rng = StdRng::seed_from_u64(123);
         rng.fill(&mut hashes[..]);
 

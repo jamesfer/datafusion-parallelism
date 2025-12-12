@@ -47,37 +47,6 @@ impl ParallelHashJoin {
         }
     }
 
-    // pub fn convert_hash_join(value: &HashJoinExec, build_implementation_version: JoinReplacement) -> Result<Self, String> {
-    //     if !ProbeLookupStreamImplementation::join_type_is_supported(value.join_type()) {
-    //         return Err(format!("Unsupported join type {}", value.join_type));
-    //     }
-    //     if value.projection.is_some() {
-    //         return Err(format!("Projection not supported {:?}", value.projection));
-    //     }
-    //     if value.filter.is_some() {
-    //         return Err(format!("Filter not supported {:?}", value.filter));
-    //     }
-    //     if value.mode != PartitionMode::Partitioned {
-    //         return Err(format!("Mode not supported {:?}", value.mode));
-    //     }
-    //     if value.null_equals_null {
-    //         return Err(format!("Null equals null not supported {:?}", value.null_equals_null));
-    //     }
-    //
-    //     let eq_from_hash_join = value.properties().eq_properties.clone();
-    //     let properties = ParallelHashJoin::compute_properties(eq_from_hash_join.clone(), &value.left);
-    //
-    //     Ok(ParallelHashJoin {
-    //         properties,
-    //         left: value.left.clone(),
-    //         right: value.right.clone(),
-    //         on: value.on.clone(),
-    //         join_type: value.join_type.clone(),
-    //         build_implementation_version,
-    //         executor_instance: Arc::new(OnceLock::new()),
-    //     })
-    // }
-
     pub fn join_type(&self) -> &JoinType {
         &self.join_type
     }
