@@ -1,55 +1,15 @@
+use crate::operator::version10::new_map_3::utils::atomic::{AsAtomic, AtomicOps};
 use std::alloc::{alloc_zeroed, Layout};
 use std::cell::UnsafeCell;
 use std::cmp::max;
-use std::fmt::{Display, Formatter};
-use std::mem::MaybeUninit;
+use std::fmt::Display;
 use std::ptr::{slice_from_raw_parts_mut, NonNull};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
-use crate::operator::version10::new_map_3::atomic::{AsAtomic, AtomicOps};
-use crate::operator::version10::new_map_3::group::{BulkGroupStrategy, BulkGroupStrategy32, BulkGroupStrategyN, GroupStrategy, IterableGroupStrategy};
-use crate::operator::version10::new_map_3::probe_sequence::{ProbeSequence, ProbeSequenceBulk, ProbeSequenceBulkN};
+use crate::operator::version10::new_map_3::group::group_strategy::{BulkGroupStrategy, BulkGroupStrategy32, BulkGroupStrategyN, GroupStrategy, IterableGroupStrategy};
+use crate::operator::version10::new_map_3::group::probe_sequence::{ProbeSequence, ProbeSequenceBulk, ProbeSequenceBulkN};
 
 const N: usize = 8;
-
-// trait MaybeDisplay {
-//     fn maybe_display(&self) -> String;
-// }
-//
-// impl<T> MaybeDisplay for T {
-//     default fn maybe_display(&self) -> String {
-//        "_undisplayable_".to_string()
-//     }
-// }
-//
-// impl<T: Display> MaybeDisplay for T {
-//     fn maybe_display(&self) -> String {
-//         format!("{}", self)
-//     }
-// }
-//
-// trait CanDisplay<V> {
-//     fn display(&self, v: &V) -> String;
-// }
-//
-//
-// struct S<'a, V>(&'a V);
-//
-// impl <'a, V: Display> S<'a, V> {
-//     fn display(&self) -> String {
-//         format!("{}", self.0)
-//     }
-// }
-//
-// trait NonDisplay {
-//     fn display(&self) -> String;
-// }
-//
-// impl <'a, V> NonDisplay for S<'a, V> {
-//     fn display(&self) -> String {
-//         "_undisplayable_".to_string()
-//     }
-// }
 
 const OVERFLOW_BIT_MASK: u64 = 1 << 63;
 const TOP_8_BITS_MASK: u64 = u64::MAX << 56;
@@ -61,14 +21,11 @@ const HASH_OCCUPIED_BIT: u64 = 1 << 63;
 
 struct Inner<V, G> {
     bucket_mask: usize,
-    // Maybe one day this could be optimised to avoid using two separate pointers
-    // data: Box<[(u64, V)]>,
-    // tags: Box<[u8]>,
     memory: NonNull<u8>,
     memory_size: usize,
     tags_end: usize,
     data_start: usize,
-    pub max_insert_attemps: usize,
+    pub max_insert_attempts: usize,
     phantom: std::marker::PhantomData<(V, G)>,
 }
 
@@ -79,30 +36,6 @@ impl <V, G> Drop for Inner<V, G> {
         // Pointer is now dangling, but the struct should immediately be dropped
     }
 }
-
-// impl <V, G> CanDisplay<V> for Inner<V, G> {
-//     default fn display(&self, v: &V) -> String {
-//         "_undisplayable_".to_string()
-//     }
-// }
-//
-// impl <V: Display, G> CanDisplay<V> for Inner<V, G> {
-//     fn display(&self, v: &V) -> String {
-//         format!("{}", v)
-//     }
-// }
-
-// impl <V, G> Inner<V, G> {
-//     default fn display(&self, v: V) -> String {
-//         "_undisplayable_".to_string()
-//     }
-// }
-//
-// impl <V, G> Inner<V, G> {
-//     default fn display(&self, v: V) -> String {
-//         "_undisplayable_".to_string()
-//     }
-// }
 
 impl <V, G> Inner<V, G>
 where
@@ -131,7 +64,7 @@ where
             tags_end: tags_size,
             data_start,
             phantom: std::marker::PhantomData,
-            max_insert_attemps: capacity / G::GROUP_SIZE,
+            max_insert_attempts: capacity / G::GROUP_SIZE,
         };
         if G::GROUP_SIZE != 0 {
             inner.tags_mut().fill(G::EMPTY_TAG);
@@ -653,7 +586,7 @@ where
             }
 
             attempts += 1;
-            let max_attempts = self.max_insert_attemps;
+            let max_attempts = self.max_insert_attempts;
             if attempts >= max_attempts {
                 return (Err(()), attempts);
             }
@@ -673,7 +606,7 @@ where
 
     #[inline(always)]
     pub fn max_insert_attempts(&mut self) -> usize {
-        self.max_insert_attemps
+        self.max_insert_attempts
     }
 
     #[inline(always)]
@@ -1054,7 +987,7 @@ where
     #[inline(always)]
     pub fn max_insert_attempts(&self) -> usize {
         let inner = unsafe { &mut *self.inner.get() };
-        inner.max_insert_attemps
+        inner.max_insert_attempts
     }
 
     pub fn entries(&self) -> WritableMapIterator<'_, V, G>
@@ -1299,13 +1232,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::operator::version10::new_map_3::fixed_table::WritableFixedTable;
     use rand::rngs::StdRng;
     use rand::seq::SliceRandom;
     use rand::{Rng, SeedableRng};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use crate::operator::version10::new_map_3::fixed_table::WritableFixedTable;
-    use crate::operator::version10::new_map_3::group::Group16;
+    use crate::operator::version10::new_map_3::group::group16::Group16;
 
     #[test]
     fn create_empty_table() {
@@ -1614,13 +1547,13 @@ mod tests {
 
 #[cfg(test)]
 mod tests8 {
+    use crate::operator::version10::new_map_3::fixed_table::WritableFixedTable;
     use rand::rngs::StdRng;
     use rand::seq::SliceRandom;
     use rand::{Rng, SeedableRng};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use crate::operator::version10::new_map_3::fixed_table::WritableFixedTable;
-    use crate::operator::version10::new_map_3::group::Group8;
+    use crate::operator::version10::new_map_3::group::group8::Group8;
 
     #[test]
     fn create_empty_table() {

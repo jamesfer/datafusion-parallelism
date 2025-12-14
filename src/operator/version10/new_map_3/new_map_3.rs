@@ -1,3 +1,7 @@
+use crate::operator::version10::new_map_3::fixed_table::{ReadOnlyFixedTable, WritableFixedTable};
+use crate::operator::version10::new_map_3::group::group8::Group8;
+use crate::operator::version10::new_map_3::utils::atomic::AsAtomic;
+use crate::operator::version10::new_map_3::utils::write_notify_cell::WriteNotifyCell;
 use std::fmt::Debug;
 use std::future::Future;
 use std::ops::Deref;
@@ -5,14 +9,10 @@ use std::pin::Pin;
 use std::sync::atomic::{fence, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use crate::operator::version10::new_map_3::atomic::AsAtomic;
-use crate::operator::version10::new_map_3::fixed_table::{ReadOnlyFixedTable, WritableFixedTable};
-use crate::operator::version10::new_map_3::group::Group8;
-use crate::operator::version10::new_map_3::write_notify_cell::WriteNotifyCell;
 
 type Group = Group8;
 
-pub type ReadOnlyTable<V> = ReadOnlyFixedTable<V, Group8>;
+pub type ReadOnlyTable<V> = ReadOnlyFixedTable<V, Group>;
 
 // Just a data wrapper around a fixed table with some other information
 struct InnerTable<V> {
@@ -466,10 +466,10 @@ enum ClaimMigrationFailure {
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
+    use crate::operator::version10::new_map_3::new_map_3::WriteOnlyTable;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
-    use crate::operator::version10::new_map_3::new_map_3::WriteOnlyTable;
+    use std::iter;
 
     #[tokio::test(flavor = "multi_thread")]
     pub async fn make_single_threaded() {

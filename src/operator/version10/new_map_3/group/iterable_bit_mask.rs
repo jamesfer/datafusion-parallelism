@@ -40,7 +40,7 @@ impl IterableBitMaskT for IterableBitMask {
 
 #[cfg(test)]
 mod tests {
-    use crate::operator::version10::new_map_3::iterable_bit_mask::IterableBitMask;
+    use crate::operator::version10::new_map_3::group::iterable_bit_mask::IterableBitMask;
 
     #[test]
     pub fn single_valued_bit_mask() {
