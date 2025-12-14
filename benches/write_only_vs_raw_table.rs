@@ -11,71 +11,122 @@ use rand::{Rng, SeedableRng};
 use tokio::runtime::{Builder, Runtime};
 
 const TOTAL_KEYS: usize = 1 << 17;
-const LOOKUP_COUNT: usize = 1 << 12;
-const HIT_RATE: f64 = 0.7;
+const LOOKUP_COUNT: usize = 1 << 6;
+const HIT_RATE: f64 = 0.5;
 const PARTITIONS: usize = 8;
-const RNG_SEED: u64 = 0xfeed_babe_d00d_beef;
+const RNG_SEED: u64 = 0x42;
 
 #[derive(Clone, Copy)]
 struct Scenario {
-    name: &'static str,
-    raw_table_entries: usize,
+    fake_partitioning: bool,
+    hit_rate: f32,
 }
 
-const SCENARIOS: [Scenario; 2] = [
+impl Scenario {
+    fn name(&self) -> String {
+        format!(
+            "{}/{}",
+            if self.fake_partitioning { "partitioned" } else { "equal_sizes" },
+            self.hit_rate,
+        )
+    }
+
+    fn partitioned_entries(&self) -> usize {
+        if self.fake_partitioning {
+            TOTAL_KEYS / PARTITIONS
+        } else {
+            TOTAL_KEYS
+        }
+    }
+}
+
+const SCENARIOS: [Scenario; 6] = [
     Scenario {
-        name: "equal_writes",
-        raw_table_entries: TOTAL_KEYS,
+        fake_partitioning: false,
+        hit_rate: 0.5,
     },
     Scenario {
-        name: "hash_partitioned",
-        raw_table_entries: TOTAL_KEYS / PARTITIONS,
+        fake_partitioning: false,
+        hit_rate: 0.75,
+    },
+    Scenario {
+        fake_partitioning: false,
+        hit_rate: 0.95,
+    },
+    Scenario {
+        fake_partitioning: true,
+        hit_rate: 0.5,
+    },
+    Scenario {
+        fake_partitioning: true,
+        hit_rate: 0.75,
+    },
+    Scenario {
+        fake_partitioning: true,
+        hit_rate: 0.95,
     },
 ];
 
+fn configure_criterion() -> Criterion {
+    Criterion::default()
+        .warm_up_time(Duration::from_secs(2))
+        .measurement_time(Duration::from_secs(5))
+}
+
+criterion_group! {
+    name = benches;
+    config = configure_criterion();
+    targets = criterion_benchmark
+}
+criterion_main!(benches);
+
 fn criterion_benchmark(c: &mut Criterion) {
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
-    let mut rng = StdRng::seed_from_u64(RNG_SEED);
-
-    let entries = generate_entries(&mut rng, TOTAL_KEYS);
-    let write_only_table = build_write_only_table(&runtime, &entries);
-    let write_lookup_keys = Arc::new(generate_lookup_keys(&entries, LOOKUP_COUNT, HIT_RATE, &mut rng));
-
+    // TODO rename
     let mut group = c.benchmark_group("WriteOnly_vs_RawTable");
+
+    let mut rng = StdRng::seed_from_u64(RNG_SEED);
+    let entries = generate_entries(&mut rng, TOTAL_KEYS);
 
     for scenario in SCENARIOS {
         group.throughput(Throughput::Elements(LOOKUP_COUNT as u64));
-        let raw_entries = &entries[..scenario.raw_table_entries];
-        let raw_table = Arc::new(build_raw_table(raw_entries));
-        let raw_lookup_keys = Arc::new(generate_lookup_keys(raw_entries, LOOKUP_COUNT, HIT_RATE, &mut rng));
 
-        let write_table_clone = Arc::clone(&write_only_table);
-        let write_lookup_clone = Arc::clone(&write_lookup_keys);
-        group.bench_function(BenchmarkId::new("write_only_table", scenario.name), move |b| {
+        group.bench_function(BenchmarkId::new("hashbrown", scenario.name()), |b| {
+            let mut rng = StdRng::seed_from_u64(RNG_SEED);
+            let raw_entries = &entries[..scenario.partitioned_entries()];
+            let raw_table = build_raw_table(raw_entries);
+            let lookup_keys = generate_lookup_keys(raw_entries, LOOKUP_COUNT, HIT_RATE, &mut rng);
+            assert_eq!(lookup_keys.len(), LOOKUP_COUNT);
+
             b.iter(|| {
                 let mut acc = 0usize;
-                for key in write_lookup_clone.iter() {
-                    if let Some(value) = write_table_clone.get(*key) {
-                        acc = acc.wrapping_add(*value);
-                    }
-                }
-                black_box(acc);
-            });
-        });
-
-        let raw_table_clone = Arc::clone(&raw_table);
-        let raw_lookup_clone = Arc::clone(&raw_lookup_keys);
-        group.bench_function(BenchmarkId::new("raw_table", scenario.name), move |b| {
-            b.iter(|| {
-                let mut acc = 0usize;
-                for key in raw_lookup_clone.iter() {
-                    if let Some(value) = lookup_raw(&raw_table_clone, *key) {
+                for key in lookup_keys.iter() {
+                    if let Some(value) = lookup_raw(&raw_table, *key) {
                         acc = acc.wrapping_add(value);
                     }
                 }
                 black_box(acc);
             });
         });
+
+        if scenario.fake_partitioning == false {
+            group.bench_function(BenchmarkId::new("new_map_3", scenario.name()), |b| {
+                let mut rng = StdRng::seed_from_u64(RNG_SEED);
+                let write_only_table = build_write_only_table(&runtime, &entries);
+                let lookup_keys = generate_lookup_keys(&entries, LOOKUP_COUNT, HIT_RATE, &mut rng);
+                assert_eq!(lookup_keys.len(), LOOKUP_COUNT);
+
+                b.iter(move || {
+                    let mut acc = 0usize;
+                    for key in lookup_keys.iter() {
+                        if let Some(value) = write_only_table.get(*key) {
+                            acc = acc.wrapping_add(*value);
+                        }
+                    }
+                    black_box(acc);
+                });
+            });
+        }
     }
 
     group.finish();
@@ -95,10 +146,6 @@ fn generate_lookup_keys(
     hit_rate: f64,
     rng: &mut StdRng,
 ) -> Vec<u64> {
-    if entries.is_empty() {
-        return (0..lookup_count).map(|_| rng.gen::<u64>()).collect();
-    }
-
     let mut lookups = Vec::with_capacity(lookup_count);
     let clamped_hit_rate = hit_rate.clamp(0.0, 1.0);
     let mut hit_count = ((lookup_count as f64) * clamped_hit_rate).round() as usize;
@@ -153,16 +200,3 @@ fn lookup_raw(table: &RawTable<(u64, usize)>, hash: u64) -> Option<usize> {
         .get(hash, |(existing, _)| existing == &hash)
         .map(|(_, value)| *value)
 }
-
-fn configure_criterion() -> Criterion {
-    Criterion::default()
-        .warm_up_time(Duration::from_secs(5))
-        .measurement_time(Duration::from_secs(15))
-}
-
-criterion_group! {
-    name = benches;
-    config = configure_criterion();
-    targets = criterion_benchmark
-}
-criterion_main!(benches);
