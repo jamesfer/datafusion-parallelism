@@ -1,27 +1,23 @@
-use std::any::Any;
-use std::collections::VecDeque;
-use std::fmt::{Debug, Formatter};
-use std::future::Future;
-use std::ops::DerefMut;
-use std::pin::{pin, Pin};
-use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
-use std::task::{ready, Context, Poll};
-use std::time::{Duration, SystemTime};
+use crate::operator::work_stealing_state::PrecursorState;
+use crate::utils::abort_on_drop::AbortOnDrop;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
-use datafusion_common::DataFusionError;
+use datafusion::common::{DataFusionError, Result};
 use datafusion_physical_expr::{EquivalenceProperties, Partitioning};
-use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties};
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
-use flume::{RecvError, SendError, TryRecvError};
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
-use futures::task::SpawnExt;
+use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties};
+use flume::TryRecvError;
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use futures_core::Stream;
-use tokio::sync::{Mutex, OnceCell, Semaphore};
-use tokio::time::timeout;
-use crate::utils::abort_on_drop::AbortOnDrop;
+use std::any::Any;
+use std::collections::VecDeque;
+use std::fmt::{Debug, Formatter};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::SystemTime;
+use tokio::sync::{Mutex, OnceCell};
 
 async fn consume_input(
     id: usize,
@@ -121,10 +117,18 @@ struct WorkStealingState {
 }
 
 struct WorkStealingSharedState {
-    states: Vec<Option<WorkStealingState>>,
+    states: Vec<Mutex<Option<PrecursorState<RecordBatch>>>>,
 }
 
-type WorkStealingLazyState = Arc<OnceCell<Mutex<WorkStealingSharedState>>>;
+impl WorkStealingSharedState {
+    async fn get(&self, index: usize) -> Result<PrecursorState<RecordBatch>> {
+        let mutex = &self.states[index];
+        let mut state = mutex.lock().await;
+        state.take().ok_or(DataFusionError::Internal("State for partition already taken".to_string()))
+    }
+}
+
+type WorkStealingLazyState = Arc<OnceCell<WorkStealingSharedState>>;
 
 pub struct WorkStealingRepartitionExec {
     id: usize,
@@ -202,96 +206,99 @@ impl ExecutionPlan for WorkStealingRepartitionExec {
     }
 
     fn execute(&self, partition: usize, context: Arc<TaskContext>) -> Result<SendableRecordBatchStream, DataFusionError> {
-        let id = self.id;
+        // let id = self.id;
         let parallelism = self.parallelism();
-        let tasks = Arc::new(Mutex::new(vec![]));
+        // let tasks = Arc::new(Mutex::new(vec![]));
 
         let input_stream = self.input.execute(partition, context)?;
         let input_schema = input_stream.schema();
 
         let stream = {
             let lazy_state = Arc::clone(&self.state);
-            let tasks_clone = Arc::clone(&tasks);
+            // let tasks_clone = Arc::clone(&tasks);
 
             futures::stream::once(async move {
                 let state = lazy_state.get_or_init(|| async {
-                    Mutex::new(create_shared_state(parallelism))
+                    create_shared_state(parallelism)
                 }).await;
 
                 // Extract this partitions queues from the shared state
-                let WorkStealingState {
-                    local_sender,
-                    local_receiver,
-                    steal_queues
-                } = {
-                    let mut shared_state = state.lock().await;
-                    shared_state.states[partition].take()
-                        .ok_or(DataFusionError::Internal("State for partition already taken".to_string()))
-                }?;
+                let precursor_state = state.get(partition).await?;
+                let full_state = precursor_state.with_stream(input_stream);
 
-                // Start local task to write all the input into a queue. It will be aborted on drop
-                {
-                    let handle = tokio::task::spawn(async move {
-                        // TODO forward errors
-                        match timeout(Duration::from_secs(20), consume_input(id, partition, input_stream, local_sender)).await {
-                            Ok(Ok(_)) => {}
-                            Ok(Err(err)) => {
-                                eprintln!("Error consuming input: {}, (id {}, partition {})", err, id, partition);
-                            },
-                            Err(_) => {
-                                eprintln!("Possible deadlock while consuming input in work-stealing repartition, (id {}, partition {})", id, partition);
-                            }
-                        };
-                    });
-                    tasks_clone.lock().await.push(AbortOnDrop::new(handle));
+                let stream = futures::stream::try_unfold(full_state, |mut full_state| async move {
+                    Ok(match full_state.next().await? {
+                        None => None,
+                        Some(item) => Some((item, full_state))
+                    })
+                });
+                Ok::<_, DataFusionError>(stream)
 
-                    // // This must be in a block to ensure the local set is not used across an await
-                    // let handle = {
-                    //     let local_set = LocalSet::new();
-                    //     local_set.spawn_local(async move {
-                    //         println!("Starting task");
-                    //         // TODO forward errors
-                    //         let _ = consume_input(id, partition, input_stream, local_sender).await;
-                    //         ()
-                    //     });
-                    //
-                    //     get_local_runtime(move |local_runtime| {
-                    //         println!("Registered task");
-                    //         local_runtime.register(local_set)
-                    //     })
-                    // };
-                    // tasks_clone.lock().await.push(handle);
-                }
-
-                // Create a stream of the contents of the local queue
-                Ok::<_, DataFusionError>(
-                    futures::stream::once(async move {
-                        // println!("Output stream starting (id {}, partition {})", id, partition);
-                        futures::stream::empty()
-                    }).flatten()
-                        .chain(make_flume_stream(local_receiver, id, partition))
-                        .chain(futures::stream::once(async move {
-                            // println!("Local worker complete (id {}, partition {})", id, partition);
-                            futures::stream::empty()
-                        }).flatten())
-                        .chain(
-                            make_stealer_stream(steal_queues)
-                                .flat_map(|vec| futures::stream::iter(vec))
-                        )
-                        .chain(futures::stream::once(async move {
-                            // println!("Stealing stream complete (id {}, partition {})", id, partition);
-                            futures::stream::empty()
-                        }).flatten())
-                        .map(|batch| Ok(batch))
-                )
-            }).try_flatten()
+                // // Start local task to write all the input into a queue. It will be aborted on drop
+                // {
+                //     let handle = tokio::task::spawn(async move {
+                //         // TODO forward errors
+                //         match timeout(Duration::from_secs(20), consume_input(id, partition, input_stream, local_sender)).await {
+                //             Ok(Ok(_)) => {}
+                //             Ok(Err(err)) => {
+                //                 eprintln!("Error consuming input: {}, (id {}, partition {})", err, id, partition);
+                //             },
+                //             Err(_) => {
+                //                 eprintln!("Possible deadlock while consuming input in work-stealing repartition, (id {}, partition {})", id, partition);
+                //             }
+                //         };
+                //     });
+                //     tasks_clone.lock().await.push(AbortOnDrop::new(handle));
+                //
+                //     // // This must be in a block to ensure the local set is not used across an await
+                //     // let handle = {
+                //     //     let local_set = LocalSet::new();
+                //     //     local_set.spawn_local(async move {
+                //     //         println!("Starting task");
+                //     //         // TODO forward errors
+                //     //         let _ = consume_input(id, partition, input_stream, local_sender).await;
+                //     //         ()
+                //     //     });
+                //     //
+                //     //     get_local_runtime(move |local_runtime| {
+                //     //         println!("Registered task");
+                //     //         local_runtime.register(local_set)
+                //     //     })
+                //     // };
+                //     // tasks_clone.lock().await.push(handle);
+                // }
+                //
+                // // Create a stream of the contents of the local queue
+                // Ok::<_, DataFusionError>(
+                //     futures::stream::once(async move {
+                //         // println!("Output stream starting (id {}, partition {})", id, partition);
+                //         futures::stream::empty()
+                //     }).flatten()
+                //         .chain(make_flume_stream(local_receiver, id, partition))
+                //         .chain(futures::stream::once(async move {
+                //             // println!("Local worker complete (id {}, partition {})", id, partition);
+                //             futures::stream::empty()
+                //         }).flatten())
+                //         .chain(
+                //             make_stealer_stream(steal_queues)
+                //                 .flat_map(|vec| futures::stream::iter(vec))
+                //         )
+                //         .chain(futures::stream::once(async move {
+                //             // println!("Stealing stream complete (id {}, partition {})", id, partition);
+                //             futures::stream::empty()
+                //         }).flatten())
+                //         .map(|batch| Ok(batch))
+                // )
+            })
+                .try_flatten()
         };
 
         // println!("Returning stream with tasks");
-        Ok(Box::pin(TempStream {
-            stream: Box::pin(RecordBatchStreamAdapter::new(input_schema, stream)),
-            abort_helper: tasks,
-        }))
+        // Ok(Box::pin(TempStream {
+        //     stream: Box::pin(RecordBatchStreamAdapter::new(input_schema, stream)),
+        //     abort_helper: tasks,
+        // }))
+        Ok(Box::pin(RecordBatchStreamAdapter::new(input_schema, stream)))
     }
 }
 
@@ -329,37 +336,44 @@ impl <S: Stream<Item=Result<RecordBatch, DataFusionError>>> Stream for TempStrea
 }
 
 fn create_shared_state(parallelism: usize) -> WorkStealingSharedState {
-    // TODO this creates 1 too many steal queues
-    let (local_queues, all_steal_queues): (Vec<_>, Vec<_>) = (0..parallelism).into_iter()
-        .map(|_| {
-            let (local_sender, local_receiver) = flume::bounded(10);
-            let steal_queues = (0..parallelism).into_iter()
-                .map(|_| local_receiver.clone())
-                .collect::<Vec<_>>();
-            ((local_sender, local_receiver), steal_queues)
-        })
-        .unzip();
-
-    let states = local_queues
-        .into_iter()
-        .enumerate()
-        .map(|(i, (local_sender, local_receiver))| {
-            let steal_queues = all_steal_queues.iter()
-                .enumerate()
-                // Skip the steal queue for the current local queue
-                .filter(|(j, _)| i != *j)
-                // TODO avoid cloning all the queues here
-                .map(|(_, steal_queues)| steal_queues[i].clone())
-                .collect::<Vec<_>>();
-            Some(WorkStealingState {
-                local_sender,
-                local_receiver,
-                steal_queues,
-            })
-        })
-        .collect::<Vec<_>>();
-
     WorkStealingSharedState {
-        states,
+        states: PrecursorState::create(parallelism).into_iter()
+            .map(Some)
+            .map(Mutex::new)
+            .collect(),
     }
+
+    // // TODO this creates 1 too many steal queues
+    // let (local_queues, all_steal_queues): (Vec<_>, Vec<_>) = (0..parallelism).into_iter()
+    //     .map(|_| {
+    //         let (local_sender, local_receiver) = flume::bounded(10);
+    //         let steal_queues = (0..parallelism).into_iter()
+    //             .map(|_| local_receiver.clone())
+    //             .collect::<Vec<_>>();
+    //         ((local_sender, local_receiver), steal_queues)
+    //     })
+    //     .unzip();
+    //
+    // let states = local_queues
+    //     .into_iter()
+    //     .enumerate()
+    //     .map(|(i, (local_sender, local_receiver))| {
+    //         let steal_queues = all_steal_queues.iter()
+    //             .enumerate()
+    //             // Skip the steal queue for the current local queue
+    //             .filter(|(j, _)| i != *j)
+    //             // TODO avoid cloning all the queues here
+    //             .map(|(_, steal_queues)| steal_queues[i].clone())
+    //             .collect::<Vec<_>>();
+    //         Some(WorkStealingState {
+    //             local_sender,
+    //             local_receiver,
+    //             steal_queues,
+    //         })
+    //     })
+    //     .collect::<Vec<_>>();
+    //
+    // WorkStealingSharedState {
+    //     states,
+    // }
 }
