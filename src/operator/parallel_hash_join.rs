@@ -62,8 +62,10 @@ impl ParallelHashJoin {
 }
 
 impl DisplayAs for ParallelHashJoin {
-    fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
-        f.write_fmt(format_args!("ParallelHashJoin: join_type={:?}", self.join_type))
+    fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
+        let schema = self.schema();
+        let columns = schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>();
+        f.write_fmt(format_args!("ParallelHashJoin: join_type={:?} columns={:?}", self.join_type, columns))
     }
 }
 
