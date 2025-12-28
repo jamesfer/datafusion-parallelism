@@ -287,7 +287,7 @@ impl IterableBitMaskIntrinsics8x8 {
     pub fn reinterpret_as_u64s(slice: &mut [Self]) -> &mut [u64] {
         // Constant assertion to ensure that the pointer cast is going to succeed
         //noinspection RsAssertEqual
-        const SIZE_OK: () = assert!(size_of::<IterableBitMaskIntrinsics8x8>() == size_of::<u64>());
+        const _SIZE_OK: () = assert!(size_of::<IterableBitMaskIntrinsics8x8>() == size_of::<u64>());
         unsafe { &mut *(slice as *mut [Self] as *mut [u64]) }
     }
 
@@ -302,6 +302,7 @@ impl IterableBitMaskIntrinsics8x8 {
         // Divide the bit set index by 8 to get a regular index value
         Some((zeros / 8) as usize)
     }
+
     #[inline]
     pub fn any_bit_set(&self) -> bool {
         self.value != 0

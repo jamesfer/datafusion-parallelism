@@ -97,7 +97,7 @@ where
         get_matching_indices(&probe_hashes, read_only_join_map);
 
     // Filter out rows that don't have equal values, protecting against hash collisions
-    let build_keys = evaluate_expressions(&build_expressions, &build_side_records)?;
+    let build_keys = evaluate_expressions(build_expressions, build_side_records)?;
     let (build_indices, probe_indices) = equal_rows_arr(
         &build_indices,
         &probe_indices,
