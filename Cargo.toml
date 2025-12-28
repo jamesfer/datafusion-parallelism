@@ -32,8 +32,12 @@ name = "sort"
 harness = false
 
 [[bench]]
-name = "write_only_vs_raw_table"
+name = "hash_map_lookup_speed"
 harness = false
+
+[[bin]]
+name = "compare_probe_sequences"
+path = "bin/compare_probe_sequences.rs"
 
 [dependencies]
 async-std = "1.13.0"
