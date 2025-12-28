@@ -140,14 +140,32 @@ impl Results {
     }
 }
 
-#[tokio::main]
-pub async fn main() -> Result<()> {
-    let mut results = Results::new();
+pub fn main() -> Result<()> {
+    let mut args = vec![];
     for arg in std::env::args() {
-        results.command_line_args.push(arg);
+        args.push(arg);
     }
 
     let opt = Opt::from_args();
+
+    // Create a runtime with the specified parallelism
+    let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
+    if let Some(concurrency) = opt.concurrency {
+        runtime_builder.worker_threads(concurrency as usize);
+    }
+    let runtime = runtime_builder
+        .enable_all()
+        .build()?;
+
+    runtime.block_on(run(opt, args))
+}
+
+async fn run(
+    opt: Opt,
+    args: Vec<String>,
+) -> Result<(), DataFusionError> {
+    let mut results = Results::new();
+    results.command_line_args = args;
 
     let query_path = format!("{}", opt.query_path.display());
     let output_path = format!("{}", opt.output.display());
