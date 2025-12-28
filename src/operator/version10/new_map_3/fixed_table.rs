@@ -2,12 +2,11 @@ use crate::operator::version10::new_map_3::utils::atomic::{AsAtomic, AtomicOps};
 use std::alloc::{alloc_zeroed, Layout};
 use std::cell::UnsafeCell;
 use std::cmp::max;
-use std::fmt::Display;
 use std::ptr::{slice_from_raw_parts_mut, NonNull};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use crate::operator::version10::new_map_3::group::group_strategy::{BulkGroupStrategy, BulkGroupStrategy32, BulkGroupStrategyN, GroupStrategy, IterableGroupStrategy};
-use crate::operator::version10::new_map_3::group::probe_sequence::{ProbeSequence, ProbeSequenceBulk, ProbeSequenceBulkN};
+use crate::operator::version10::new_map_3::group::probe_sequence::{ProbeSequence, ProbeSequenceBulk, ProbeSequenceBulk32, ProbeSequenceBulkN};
 
 const N: usize = 8;
 
@@ -19,17 +18,17 @@ const IGNORE_TOP_8_MASK: u64 = 0x0FFF_FFFF_FFFF_FFFF;
 const HASH_OCCUPIED_BIT: u64 = 1 << 63;
 // const HASH_OCCUPIED_BIT: u64 = 0x1000_0000_0000_0000;
 
-struct Inner<V, G> {
+struct Inner<V, G, P> {
     bucket_mask: usize,
     memory: NonNull<u8>,
     memory_size: usize,
     tags_end: usize,
     data_start: usize,
     pub max_insert_attempts: usize,
-    phantom: std::marker::PhantomData<(V, G)>,
+    phantom: std::marker::PhantomData<(V, G, P)>,
 }
 
-impl <V, G> Drop for Inner<V, G> {
+impl <V, G, P> Drop for Inner<V, G, P> {
     fn drop(&mut self) {
         let slice_ptr = unsafe { slice_from_raw_parts_mut(self.memory.as_ptr(), self.memory_size) };
         drop(unsafe { Box::from_raw(slice_ptr) });
@@ -37,10 +36,11 @@ impl <V, G> Drop for Inner<V, G> {
     }
 }
 
-impl <V, G> Inner<V, G>
+impl <V, G, P> Inner<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
-    G: GroupStrategy
+    G: GroupStrategy,
+    P: ProbeSequence,
 {
     const GROUP_MEMORY_WIDTH: usize = G::GROUP_SIZE * size_of::<u8>();
 
@@ -142,7 +142,8 @@ where
     pub unsafe fn get(&self, hash: u64) -> Option<&V> {
         // Compute starting position of probe sequence
         let (search_tag, search_hash) = Self::prepare_hash(hash);
-        let (mut index, mut stride) = G::ProbeSeq::start(hash, self.bucket_mask);
+        let mut index = P::start_index(hash, self.bucket_mask);
+        let mut stride = 0;
 
         loop {
             let group_start = index;
@@ -164,7 +165,7 @@ where
             }
 
             // Probe to the next group
-            index = G::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+            index = P::next(index, &mut stride, hash, search_tag, self.bucket_mask);
         }
     }
 
@@ -172,7 +173,8 @@ where
     pub unsafe fn get_const_lookup(&self, hash: u64) -> Option<&V> {
         // Compute starting position of probe sequence
         let (search_tag, search_hash) = Self::prepare_hash(hash);
-        let (mut index, mut stride) = G::ProbeSeq::start(hash, self.bucket_mask);
+        let mut index = P::start_index(hash, self.bucket_mask);
+        let mut stride = 0;
 
         loop {
             let group_start = index;
@@ -194,13 +196,13 @@ where
             }
 
             // Probe to the next group
-            index = G::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+            index = P::next(index, &mut stride, hash, search_tag, self.bucket_mask);
         }
     }
 
     #[inline]
     pub unsafe fn get_in_bulk(&self, hashes: &[u64]) -> Vec<Option<&V>> {
-        let indexes = hashes.iter().map(|hash| G::ProbeSeq::start_index(*hash, self.bucket_mask)).collect::<Vec<_>>();
+        let indexes = hashes.iter().map(|hash| P::start_index(*hash, self.bucket_mask)).collect::<Vec<_>>();
         let groups = indexes.iter().map(|index| G::load_ptr(self.tag_group_ptr(*index))).collect::<Vec<_>>();
 
         let search_tags = hashes.iter().map(|hash| G::get_tag(*hash)).collect::<Vec<_>>();
@@ -217,15 +219,16 @@ where
             .collect::<Vec<_>>();
 
         let search_hashes = hashes.iter().map(|hash| hash | HASH_OCCUPIED_BIT).collect::<Vec<_>>();
-        // let stride = hashes.iter().map(|hash| G::ProbeSeq::initial_stride(*hash, self.bucket_mask)).collect::<Vec<_>>();
+        // let stride = hashes.iter().map(|hash| P::initial_stride(*hash, self.bucket_mask)).collect::<Vec<_>>();
 
         search_tags.into_iter()
             .zip(search_hashes.into_iter())
+            .zip(hashes.into_iter())
             .zip(indexes.into_iter())
             // .zip(stride.into_iter())
             .zip(iterators.into_iter())
             .zip(first_position.into_iter())
-            .map(|(((((search_tag, search_hash), mut index)), mut iterator), first_position)| {
+            .map(|((((((search_tag, search_hash), hash), mut index)), mut iterator), first_position)| {
                 // Check the first computed entry from the iterator
                 if let Some(first_item_index) = first_position {
                     let item = self.data_ref(first_item_index);
@@ -247,8 +250,8 @@ where
                 }
 
                 // Probe to the next group
-                let mut stride = G::ProbeSeq::initial_stride(search_hash, self.bucket_mask);
-                index = G::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+                let mut stride = P::initial_stride(search_hash, self.bucket_mask);
+                index = P::next(index, &mut stride, *hash, search_tag, self.bucket_mask);
 
                 loop {
                     let group_start = index;
@@ -270,7 +273,7 @@ where
                     }
 
                     // Probe to the next group
-                    index = G::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+                    index = P::next(index, &mut stride, *hash, search_tag, self.bucket_mask);
                 }
             })
             .collect()
@@ -280,14 +283,15 @@ where
     pub unsafe fn get_in_bulk_static(&self, hashes: [&u64; 256]) -> Vec<Option<&V>> {
         let search_tags = hashes.iter().map(|hash| G::get_tag(**hash)).collect::<Vec<_>>();
         let search_hashes = hashes.iter().map(|hash| **hash | HASH_OCCUPIED_BIT).collect::<Vec<_>>();
-        let indexes = hashes.iter().map(|hash| G::ProbeSeq::start_index(**hash, self.bucket_mask)).collect::<Vec<_>>();
-        let stride = hashes.iter().map(|hash| G::ProbeSeq::initial_stride(**hash, self.bucket_mask)).collect::<Vec<_>>();
+        let indexes = hashes.iter().map(|hash| P::start_index(**hash, self.bucket_mask)).collect::<Vec<_>>();
+        let stride = hashes.iter().map(|hash| P::initial_stride(**hash, self.bucket_mask)).collect::<Vec<_>>();
 
         search_tags.into_iter()
             .zip(search_hashes.into_iter())
+            .zip(hashes.into_iter())
             .zip(indexes.into_iter())
             .zip(stride.into_iter())
-            .map(|(((search_tag, search_hash), mut index), mut stride)| {
+            .map(|((((search_tag, search_hash), hash), mut index), mut stride)| {
                 loop {
                     let group_start = index;
                     let group = G::load_ptr(self.tag_group_ptr(group_start));
@@ -308,7 +312,7 @@ where
                     }
 
                     // Probe to the next group
-                    index = G::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+                    index = P::next(index, &mut stride, *hash, search_tag, self.bucket_mask);
                 }
             })
             .collect()
@@ -318,18 +322,19 @@ where
     pub unsafe fn get_in_bulk_4(&self, hashes: [&u64; 256]) -> Vec<Option<&V>> {
         // Compute starting position of probe sequence
         // let (search_tag, search_hash) = Self::prepare_hash(hash);
-        // let (mut index, mut stride) = G::ProbeSeq::start(hash, self.bucket_mask);
+        // let (mut index, mut stride) = P::start(hash, self.bucket_mask);
 
         let search_tags = hashes.iter().map(|hash| G::get_tag(**hash)).collect::<Vec<_>>();
         let search_hashes = hashes.iter().map(|hash| **hash | HASH_OCCUPIED_BIT).collect::<Vec<_>>();
-        let indexes = hashes.iter().map(|hash| G::ProbeSeq::start_index(**hash, self.bucket_mask)).collect::<Vec<_>>();
-        let stride = hashes.iter().map(|hash| G::ProbeSeq::initial_stride(**hash, self.bucket_mask)).collect::<Vec<_>>();
+        let indexes = hashes.iter().map(|hash| P::start_index(**hash, self.bucket_mask)).collect::<Vec<_>>();
+        let stride = hashes.iter().map(|hash| P::initial_stride(**hash, self.bucket_mask)).collect::<Vec<_>>();
 
         search_tags.into_iter()
             .zip(search_hashes.into_iter())
+            .zip(hashes.into_iter())
             .zip(indexes.into_iter())
             .zip(stride.into_iter())
-            .map(|(((search_tag, search_hash), mut index), mut stride)| {
+            .map(|((((search_tag, search_hash), hash), mut index), mut stride)| {
                 loop {
                     let group_start = index;
                     let group = G::load_ptr(self.tag_group_ptr(group_start));
@@ -350,7 +355,7 @@ where
                     }
 
                     // Probe to the next group
-                    index = G::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+                    index = P::next(index, &mut stride, *hash, search_tag, self.bucket_mask);
                 }
             })
             .collect()
@@ -360,7 +365,8 @@ where
     pub unsafe fn get_with_stats(&self, hash: u64) -> (Option<&V>, usize, usize) {
         // Compute starting position of probe sequence
         let (search_tag, _) = Self::prepare_hash(hash);
-        let (mut index, mut stride) = G::ProbeSeq::start(hash, self.bucket_mask);
+        let mut index = P::start_index(hash, self.bucket_mask);
+        let mut stride = 0;
 
         let mut probe_length = 0;
         let mut tags_false_positives = 0;
@@ -392,7 +398,7 @@ where
             }
 
             // Chunk is full, probe to the next one
-            index = G::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+            index = P::next(index, &mut stride, hash, search_tag, self.bucket_mask);
             probe_length += 1;
         }
 
@@ -412,7 +418,7 @@ where
     //         search_tags[i] = tag;
     //         storable_hashes[i] = storable;
     //
-    //         let (index, stride) = G::ProbeSeq::start(*hash, self.bucket_mask);
+    //         let (index, stride) = P::start(*hash, self.bucket_mask);
     //         indexes[i] = index;
     //         strides[i] = stride;
     //     }
@@ -493,11 +499,9 @@ where
     pub fn insert_atomically(&mut self, hash: u64, value: V) -> (Result<Option<V>, ()>, usize) {
         // Compute starting position of probe sequence
         let (search_tag, storable_hash) = Self::prepare_hash(hash);
-        let (mut index, mut stride) = G::ProbeSeq::start(hash, self.bucket_mask);
+        let mut index = P::start_index(hash, self.bucket_mask);
+        let mut stride = 0;
 
-        // println!("Inserting {} : {hash} using search tag {search_tag}, starting at {index}", self.display(&value));
-
-        // let mut history = Vec::with_capacity(chunks.len());
         let mut attempts = 0;
         loop {
             let group_start = index;
@@ -510,8 +514,6 @@ where
             Self::load_tags_atomically(group_tags, loaded_tags);
             let group = unsafe { G::load(&loaded_tags) };
 
-            // history.push((chunk_index, loaded_tags.clone()));
-
             // Check if the search tag appears in the chunk's tags
             for position in unsafe { G::match_tag(&group, search_tag) } {
                 let item_index = (group_start + position) & self.bucket_mask;
@@ -523,10 +525,8 @@ where
                     let atomic_value = unsafe { Self::atomic_value_ref(item) };
                     let previous = atomic_value.swap(value, Ordering::Relaxed);
 
-                    // println!("Overwrote value {:?} with {:?} at position {} in chunk {}, masked hash {:0b}", previous, value, position, chunk_index, masked_item_hash);
-
                     // Due to unpredictable orderings between atomic write, it is possible that the
-                    // hash was set but no the tag, so we still need to check if the value is 0
+                    // hash was set but no the value, so we still need to check if the value is 0
                     return (Ok(Self::ignore_default_value(previous)), attempts);
                 }
 
@@ -596,7 +596,7 @@ where
             // }
 
             // Chunk is full, probe to the next one
-            index = G::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+            index = P::next(index, &mut stride, hash, search_tag, self.bucket_mask);
         }
 
         // There was not enough space in the table to store a new value
@@ -671,10 +671,11 @@ where
     }
 }
 
-impl <V, G> Inner<V, G>
+impl <V, G, P> Inner<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
     G: BulkGroupStrategy32,
+    P: ProbeSequence,
 {
     #[inline(always)]
     pub unsafe fn get_in_bulk_group_32(&self, hashes: &[u64; 32]) -> [Option<&V>; 32] {
@@ -698,20 +699,21 @@ where
         let strides = [0usize; 32];
 
         let mut output = [None; 32];
-        for ((((search_tag, search_hash), index), mut stride), output) in search_tags.into_iter()
+        for (((((search_tag, search_hash), hash), index), mut stride), output) in search_tags.into_iter()
             .zip(search_hashes.into_iter())
+            .zip(hashes.into_iter())
             .zip(indices.into_iter())
             .zip(strides.into_iter())
             .zip(output.iter_mut()) {
             let mut index = index as usize;
-            *output = self.inner_loop_32(search_tag, search_hash, &mut index, &mut stride);
+            *output = self.inner_loop_32(search_tag, search_hash, *hash, &mut index, &mut stride);
         }
 
         output
     }
 
     #[inline(always)]
-    unsafe fn inner_loop_32(&self, search_tag: u8, search_hash: u64, index: &mut usize, stride: &mut usize) -> Option<&V> {
+    unsafe fn inner_loop_32(&self, search_tag: u8, search_hash: u64, hash: u64, index: &mut usize, stride: &mut usize) -> Option<&V> {
         // let search_hash = hash | HASH_OCCUPIED_BIT;
         loop {
             let group = G::load_ptr(self.tag_group_ptr(*index));
@@ -732,15 +734,16 @@ where
             }
 
             // Probe to the next group
-            *index = <G as GroupStrategy>::ProbeSeq::next(*index, search_tag, stride, self.bucket_mask);
+            *index = P::next(*index, stride, hash, search_tag, self.bucket_mask);
         }
     }
 }
 
-impl <V, G> Inner<V, G>
+impl <V, G, P> Inner<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
     G: BulkGroupStrategyN,
+    P: ProbeSequence,
 {
     #[inline(always)]
     pub unsafe fn get_in_bulk_group_n<const N: usize>(&self, hashes: &[u64; N], output: &mut [Option<V>; N]) {
@@ -758,18 +761,19 @@ where
         }
         let strides = [0usize; N];
 
-        for ((((search_tag, search_hash), index), mut stride), output) in search_tags.into_iter()
+        for (((((search_tag, search_hash), hash), index), mut stride), output) in search_tags.into_iter()
             .zip(search_hashes.into_iter())
+            .zip(hashes.into_iter())
             .zip(indices.into_iter())
             .zip(strides.into_iter())
             .zip(output.iter_mut()) {
             let mut index = index as usize;
-            *output = self.inner_loop_n(search_tag, search_hash, &mut index, &mut stride).cloned();
+            *output = self.inner_loop_n(search_tag, search_hash, *hash, &mut index, &mut stride).cloned();
         }
     }
 
     #[inline(always)]
-    unsafe fn inner_loop_n(&self, search_tag: u8, search_hash: u64, index: &mut usize, stride: &mut usize) -> Option<&V> {
+    unsafe fn inner_loop_n(&self, search_tag: u8, search_hash: u64, hash: u64, index: &mut usize, stride: &mut usize) -> Option<&V> {
         // let search_hash = hash | HASH_OCCUPIED_BIT;
         loop {
             let group = G::load_ptr(self.tag_group_ptr(*index));
@@ -790,7 +794,7 @@ where
             }
 
             // Probe to the next group
-            *index = <G as GroupStrategy>::ProbeSeq::next(*index, search_tag, stride, self.bucket_mask);
+            *index = P::next(*index, stride, hash, search_tag, self.bucket_mask);
         }
     }
 
@@ -808,13 +812,14 @@ where
         let groups = indices.map(|index| self.tag_group_ptr(index as usize));
         let match_tags = G::match_tag_n(&groups, &search_tags);
 
-        for (((((search_tag, search_hash), index), group), match_tag), output) in search_tags.into_iter()
+        for ((((((search_tag, search_hash), hash), index), group), match_tag), output) in search_tags.into_iter()
             .zip(search_hashes.into_iter())
+            .zip(hashes.into_iter())
             .zip(indices.into_iter())
             .zip(groups.into_iter())
             .zip(match_tags.into_iter())
             .zip(output.iter_mut()) {
-            *output = self.inner_loop_n_b(search_tag, search_hash, index as usize, group, match_tag).cloned();
+            *output = self.inner_loop_n_b(search_tag, search_hash, *hash, index as usize, group, match_tag).cloned();
         }
     }
 
@@ -823,6 +828,7 @@ where
         &self,
         search_tag: u8,
         search_hash: u64,
+        hash: u64,
         mut index: usize,
         group_ptr: *const u8,
         mut match_tag: G::TagIt,
@@ -845,7 +851,7 @@ where
         let mut stride = 0usize;
         loop {
             // Probe to the next group
-            index = <G as GroupStrategy>::ProbeSeq::next(index, search_tag, &mut stride, self.bucket_mask);
+            index = P::next(index, &mut stride, hash, search_tag, self.bucket_mask);
 
             // Check if the search tag appears in the chunk's tags
             let group = G::load_ptr(self.tag_group_ptr(index));
@@ -866,15 +872,16 @@ where
     }
 }
 
-impl <V, G> Inner<V, G>
+impl <V, G, P> Inner<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
     G: BulkGroupStrategy,
+    P: ProbeSequence + ProbeSequenceBulk,
 {
     #[inline(always)]
     pub unsafe fn get_in_bulk_group(&self, hashes: &[u64; 8]) -> [Option<&V>; 8] {
-        let capacity_mask = <G as BulkGroupStrategy>::ProbeSeq::load_capacity_mask(self.bucket_mask);
-        let indices = <G as BulkGroupStrategy>::ProbeSeq::start_indices(hashes, capacity_mask);
+        let capacity_mask = P::load_capacity_mask(self.bucket_mask);
+        let indices = P::start_indices(hashes, capacity_mask);
         let search_tags = G::get_tags(hashes);
 
         let mut search_hashes = [0u64; 8];
@@ -919,24 +926,25 @@ where
             }
 
             // Probe to the next group
-            *index = <G as GroupStrategy>::ProbeSeq::next(*index, search_tag, stride, self.bucket_mask);
+            *index = P::next(*index, stride, *hash, search_tag, self.bucket_mask);
         }
     }
 }
 
-pub struct WritableFixedTable<V, G> {
+pub struct WritableFixedTable<V, G, P> {
     size: AtomicU32,
-    inner: UnsafeCell<Inner<V, G>>,
+    inner: UnsafeCell<Inner<V, G, P>>,
     capacity: usize,
 }
 
-unsafe impl <T: Send, G> Send for WritableFixedTable<T, G> {}
-unsafe impl <T: Sync, G> Sync for WritableFixedTable<T, G> {}
+unsafe impl <T: Send, G, P> Send for WritableFixedTable<T, G, P> {}
+unsafe impl <T: Sync, G, P> Sync for WritableFixedTable<T, G, P> {}
 
-impl <V, G> WritableFixedTable<V, G>
+impl <V, G, P> WritableFixedTable<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
-    G: GroupStrategy
+    G: GroupStrategy,
+    P: ProbeSequence,
 {
     pub fn with_capacity(capacity: usize) -> Self {
         let capacity_with_headroom = capacity * 8 / 7;
@@ -990,13 +998,13 @@ where
         inner.max_insert_attempts
     }
 
-    pub fn entries(&self) -> WritableMapIterator<'_, V, G>
+    pub fn entries(&self) -> WritableMapIterator<'_, V, G, P>
     where G: IterableGroupStrategy
     {
         WritableMapIterator::new(&self)
     }
 
-    pub fn to_read_only(self) -> ReadOnlyFixedTable<V, G> {
+    pub fn to_read_only(self) -> ReadOnlyFixedTable<V, G, P> {
         ReadOnlyFixedTable::new(self.inner)
     }
 
@@ -1005,19 +1013,20 @@ where
     }
 }
 
-pub struct ReadOnlyFixedTable<V, G> {
-    inner: UnsafeCell<Inner<V, G>>,
+pub struct ReadOnlyFixedTable<V, G, P> {
+    inner: UnsafeCell<Inner<V, G, P>>,
 }
 
-unsafe impl <V: Send, G> Send for ReadOnlyFixedTable<V, G> {}
-unsafe impl <V: Sync, G> Sync for ReadOnlyFixedTable<V, G> {}
+unsafe impl <V: Send, G, P> Send for ReadOnlyFixedTable<V, G, P> {}
+unsafe impl <V: Sync, G, P> Sync for ReadOnlyFixedTable<V, G, P> {}
 
-impl <V, G> ReadOnlyFixedTable<V, G>
+impl <V, G, P> ReadOnlyFixedTable<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
     G: GroupStrategy,
+    P: ProbeSequence,
 {
-    fn new(inner: UnsafeCell<Inner<V, G>>) -> Self {
+    fn new(inner: UnsafeCell<Inner<V, G, P>>) -> Self {
         Self { inner }
     }
 
@@ -1071,10 +1080,11 @@ where
     }
 }
 
-impl <V, G> ReadOnlyFixedTable<V, G>
+impl <V, G, P> ReadOnlyFixedTable<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
     G: BulkGroupStrategy,
+    P: ProbeSequenceBulk + ProbeSequence,
 {
     #[inline(always)]
     pub fn get_in_bulk_static_8(&self, hashes: &[u64; 8]) -> [Option<&V>; 8] {
@@ -1087,10 +1097,11 @@ where
     }
 }
 
-impl <V, G> ReadOnlyFixedTable<V, G>
+impl <V, G, P> ReadOnlyFixedTable<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
     G: BulkGroupStrategy32,
+    P: ProbeSequenceBulk32 + ProbeSequence,
 {
     #[inline(always)]
     pub fn get_in_bulk_static_32(&self, hashes: &[u64; 32]) -> [Option<&V>; 32] {
@@ -1103,10 +1114,11 @@ where
     }
 }
 
-impl <V, G> ReadOnlyFixedTable<V, G>
+impl <V, G, P> ReadOnlyFixedTable<V, G, P>
 where
     V: AsAtomic + Default + PartialEq + Clone,
     G: BulkGroupStrategyN,
+    P: ProbeSequenceBulkN + ProbeSequence,
 {
     #[inline(always)]
     pub fn get_in_bulk_static_n<const N: usize>(&self, hashes: &[u64; N], output: &mut [Option<V>; N]) {
@@ -1129,7 +1141,7 @@ where
     }
 }
 
-pub struct WritableMapIterator<'a, V, G>
+pub struct WritableMapIterator<'a, V, G, P>
 where
     G: GroupStrategy + IterableGroupStrategy + 'static,
     <G as IterableGroupStrategy>::It: 'static,
@@ -1141,16 +1153,17 @@ where
     // group: <G as IterableGroupStrategy>::It::IntoIter,
     index: usize,
     positions: Vec<usize>,
-    table: &'a WritableFixedTable<V, G>,
+    table: &'a WritableFixedTable<V, G, P>,
 }
 
-impl<'a, V, G> WritableMapIterator<'a, V, G>
+impl<'a, V, G, P> WritableMapIterator<'a, V, G, P>
 where
     G: GroupStrategy + IterableGroupStrategy + 'static,
     <G as IterableGroupStrategy>::It: 'static,
     <<G as IterableGroupStrategy>::It as IntoIterator>::IntoIter: 'static,
+    P: ProbeSequence,
 {
-    fn new(table: &'a WritableFixedTable<V, G>) -> WritableMapIterator<'a, V, G>
+    fn new(table: &'a WritableFixedTable<V, G, P>) -> WritableMapIterator<'a, V, G, P>
     where
         V: AsAtomic + Clone + Default + PartialEq,
     {
@@ -1174,12 +1187,13 @@ where
     }
 }
 
-impl <'a, V, G> Iterator for WritableMapIterator<'a, V, G>
+impl <'a, V, G, P> Iterator for WritableMapIterator<'a, V, G, P>
 where
     G: GroupStrategy + IterableGroupStrategy + 'static,
     <G as IterableGroupStrategy>::It: 'static,
     <<G as IterableGroupStrategy>::It as IntoIterator>::IntoIter: 'static,
     V: AsAtomic + Clone + Default + PartialEq,
+    P: ProbeSequence,
 {
     type Item = (u64, &'a V);
 
@@ -1238,11 +1252,14 @@ mod tests {
     use rand::{Rng, SeedableRng};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use crate::operator::version10::new_map_3::group::group16::Group16;
+    use crate::operator::version10::new_map_3::group::group16_reserve_zero::Group16ReserveZero;
+    use crate::operator::version10::new_map_3::group::probe_hybrid::HybridProbeSequence;
+
+    type WritableFixedTable16 = WritableFixedTable<usize, Group16ReserveZero, HybridProbeSequence<16>>;
 
     #[test]
     fn create_empty_table() {
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(20);
+        let table = WritableFixedTable16::with_capacity(20);
         // assert_eq!(table.size, 32);
 
         let read_table = table.to_read_only();
@@ -1253,7 +1270,7 @@ mod tests {
 
     #[test]
     fn can_read_values() {
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(20);
+        let table = WritableFixedTable16::with_capacity(20);
         table.insert(0, 10).unwrap();
         table.insert(123, 1230).unwrap();
         table.insert(u64::MAX, usize::MAX).unwrap();
@@ -1269,7 +1286,7 @@ mod tests {
 
     #[test]
     fn can_read_overflowed_values() {
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(20);
+        let table = WritableFixedTable16::with_capacity(20);
         // Store 17 numbers which all belong to the same initial chunk
         for i in 0..17u64 {
             table.insert(i << 32, i as usize).unwrap();
@@ -1283,7 +1300,7 @@ mod tests {
 
     #[test]
     fn can_read_from_a_full_table() {
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(64);
+        let table = WritableFixedTable16::with_capacity(64);
         let mut hashes = [0u64; 64];
         let mut rng = StdRng::seed_from_u64(123);
         rng.fill(&mut hashes[..]);
@@ -1300,7 +1317,7 @@ mod tests {
 
     #[test]
     fn write_returns_err_when_table_is_full() {
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(64);
+        let table = WritableFixedTable16::with_capacity(64);
         // Due to headroom, the capacity actually grows to 128
         assert_eq!(table.capacity, 128);
 
@@ -1321,7 +1338,7 @@ mod tests {
 
         // Check that each of the special tag values can be stored in the same chunk without
         // colliding
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(16);
+        let table = WritableFixedTable16::with_capacity(16);
         for (value, hash) in pairs.iter() {
             table.insert(*hash, *value).unwrap();
         }
@@ -1334,7 +1351,7 @@ mod tests {
 
     #[test]
     fn can_store_zero_hash() {
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(64);
+        let table = WritableFixedTable16::with_capacity(64);
         assert_eq!(table.insert(0, 100), Ok(None));
         for i in 1..64 {
             assert_eq!(table.insert(i, i as usize), Ok(None));
@@ -1346,7 +1363,7 @@ mod tests {
 
     #[test]
     fn can_detect_duplicates() {
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(64);
+        let table = WritableFixedTable16::with_capacity(64);
         assert_eq!(table.insert(1, 1), Ok(None));
         assert_eq!(table.insert(1, 2), Ok(Some(1)));
         assert_eq!(table.insert(4023, 4), Ok(None));
@@ -1363,7 +1380,7 @@ mod tests {
         rng.fill(&mut data[..]);
 
         let pairs: Vec<_> = data.into_iter().enumerate().collect();
-        let table = Arc::new(WritableFixedTable::<usize, Group16>::with_capacity(batch_size * thread_count));
+        let table = Arc::new(WritableFixedTable16::with_capacity(batch_size * thread_count));
 
         // Start all the threads in parallel
         let batches: Vec<_> = pairs.chunks(batch_size).collect();
@@ -1402,7 +1419,7 @@ mod tests {
             .flatten()
             .collect();
         pairs.shuffle(&mut rng);
-        let table = Arc::new(WritableFixedTable::<usize, Group16>::with_capacity(batch_size * thread_count));
+        let table = Arc::new(WritableFixedTable16::with_capacity(batch_size * thread_count));
 
         // Start all the threads in parallel
         // let all_duplicates: Arc<Mutex<HashMap<u64, Vec<usize>>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -1473,7 +1490,7 @@ mod tests {
         }).collect());
 
         // Run the test in a single thread, which should always succeed
-        let tables = (0..table_count).map(|_| WritableFixedTable::<usize, Group16>::with_capacity(thread_count)).collect::<Vec<_>>();
+        let tables = (0..table_count).map(|_| WritableFixedTable16::with_capacity(thread_count)).collect::<Vec<_>>();
         for thread_index in 0..thread_count {
             for ((table_index, table), values_block) in tables.iter().enumerate().zip(values.iter()) {
                 let hash = values_block[thread_index];
@@ -1495,7 +1512,7 @@ mod tests {
         }
 
         // Then run the test again in parallel, which should fail
-        let tables = Arc::new((0..table_count).map(|_| WritableFixedTable::<usize, Group16>::with_capacity(thread_count)).collect::<Vec<_>>());
+        let tables = Arc::new((0..table_count).map(|_| WritableFixedTable16::with_capacity(thread_count)).collect::<Vec<_>>());
         let barrier = Arc::new(tokio::sync::Barrier::new(thread_count));
         let handles: Vec<_> = (0..thread_count).map(|thread_index| {
             let barrier = Arc::clone(&barrier);
@@ -1530,7 +1547,7 @@ mod tests {
 
     #[test]
     fn can_read_overflowed_values_in_bulk() {
-        let table = WritableFixedTable::<usize, Group16>::with_capacity(20);
+        let table = WritableFixedTable16::with_capacity(20);
         // Store 17 numbers which all belong to the same initial chunk
         let pairs: Vec<_> = (0..17u64).map(|i| (i << 32, i as usize)).collect();
         for (hash, value) in &pairs {
@@ -1553,11 +1570,14 @@ mod tests8 {
     use rand::{Rng, SeedableRng};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use crate::operator::version10::new_map_3::group::group8::Group8;
+    use crate::operator::version10::new_map_3::group::group8_reserve_zero::Group8ReserveZero;
+    use crate::operator::version10::new_map_3::group::probe_hybrid::HybridProbeSequence;
+
+    type WritableFixedTable8 = WritableFixedTable<usize, Group8ReserveZero, HybridProbeSequence<8>>;
 
     #[test]
     fn create_empty_table() {
-        let table = WritableFixedTable::<usize, Group8>::with_capacity(20);
+        let table = WritableFixedTable8::with_capacity(20);
         // assert_eq!(table.size, 32);
 
         let read_table = table.to_read_only();
@@ -1568,7 +1588,7 @@ mod tests8 {
 
     #[test]
     fn can_read_values() {
-        let table = WritableFixedTable::<usize, Group8>::with_capacity(20);
+        let table = WritableFixedTable8::with_capacity(20);
         table.insert(0, 10).unwrap();
         table.insert(123, 1230).unwrap();
         table.insert(u64::MAX, usize::MAX).unwrap();
@@ -1584,7 +1604,7 @@ mod tests8 {
 
     #[test]
     fn can_read_overflowed_values() {
-        let table = WritableFixedTable::<usize, Group8>::with_capacity(20);
+        let table = WritableFixedTable8::with_capacity(20);
         // Store 17 numbers which all belong to the same initial chunk
         for i in 0..17u64 {
             table.insert(i << 32, i as usize).unwrap();
@@ -1598,7 +1618,7 @@ mod tests8 {
 
     #[test]
     fn can_read_from_a_full_table() {
-        let table = WritableFixedTable::<usize, Group8>::with_capacity(64);
+        let table = WritableFixedTable8::with_capacity(64);
         let mut hashes = [0u64; 64];
         let mut rng = StdRng::seed_from_u64(123);
         rng.fill(&mut hashes[..]);
@@ -1615,7 +1635,7 @@ mod tests8 {
 
     #[test]
     fn write_returns_err_when_table_is_full() {
-        let table = WritableFixedTable::<usize, Group8>::with_capacity(64);
+        let table = WritableFixedTable8::with_capacity(64);
         // Due to headroom, the capacity actually grows to 128
         assert_eq!(table.capacity, 128);
 
@@ -1636,7 +1656,7 @@ mod tests8 {
 
         // Check that each of the special tag values can be stored in the same chunk without
         // colliding
-        let table = WritableFixedTable::<usize, Group8>::with_capacity(16);
+        let table = WritableFixedTable8::with_capacity(16);
         for (value, hash) in pairs.iter() {
             table.insert(*hash, *value).unwrap();
         }
@@ -1649,7 +1669,7 @@ mod tests8 {
 
     #[test]
     fn can_store_zero_hash() {
-        let table = WritableFixedTable::<usize, Group8>::with_capacity(64);
+        let table = WritableFixedTable8::with_capacity(64);
         assert_eq!(table.insert(0, 100), Ok(None));
         for i in 1..64 {
             assert_eq!(table.insert(i, i as usize), Ok(None));
@@ -1661,7 +1681,7 @@ mod tests8 {
 
     #[test]
     fn can_detect_duplicates() {
-        let table = WritableFixedTable::<usize, Group8>::with_capacity(64);
+        let table = WritableFixedTable8::with_capacity(64);
         assert_eq!(table.insert(1, 1), Ok(None));
         assert_eq!(table.insert(1, 2), Ok(Some(1)));
         assert_eq!(table.insert(4023, 4), Ok(None));
@@ -1678,7 +1698,7 @@ mod tests8 {
         rng.fill(&mut data[..]);
 
         let pairs: Vec<_> = data.into_iter().enumerate().collect();
-        let table = Arc::new(WritableFixedTable::<usize, Group8>::with_capacity(batch_size * thread_count));
+        let table = Arc::new(WritableFixedTable8::with_capacity(batch_size * thread_count));
 
         // Start all the threads in parallel
         let batches: Vec<_> = pairs.chunks(batch_size).collect();
@@ -1717,7 +1737,7 @@ mod tests8 {
             .flatten()
             .collect();
         pairs.shuffle(&mut rng);
-        let table = Arc::new(WritableFixedTable::<usize, Group8>::with_capacity(batch_size * thread_count));
+        let table = Arc::new(WritableFixedTable8::with_capacity(batch_size * thread_count));
 
         // Start all the threads in parallel
         // let all_duplicates: Arc<Mutex<HashMap<u64, Vec<usize>>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -1788,7 +1808,7 @@ mod tests8 {
         }).collect());
 
         // Run the test in a single thread, which should always succeed
-        let tables = (0..table_count).map(|_| WritableFixedTable::<usize, Group8>::with_capacity(thread_count)).collect::<Vec<_>>();
+        let tables = (0..table_count).map(|_| WritableFixedTable8::with_capacity(thread_count)).collect::<Vec<_>>();
         for thread_index in 0..thread_count {
             for ((table_index, table), values_block) in tables.iter().enumerate().zip(values.iter()) {
                 let hash = values_block[thread_index];
@@ -1810,7 +1830,7 @@ mod tests8 {
         }
 
         // Then run the test again in parallel, which should fail
-        let tables = Arc::new((0..table_count).map(|_| WritableFixedTable::<usize, Group8>::with_capacity(thread_count)).collect::<Vec<_>>());
+        let tables = Arc::new((0..table_count).map(|_| WritableFixedTable8::with_capacity(thread_count)).collect::<Vec<_>>());
         let barrier = Arc::new(tokio::sync::Barrier::new(thread_count));
         let handles: Vec<_> = (0..thread_count).map(|thread_index| {
             let barrier = Arc::clone(&barrier);

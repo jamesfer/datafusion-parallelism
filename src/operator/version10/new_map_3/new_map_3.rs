@@ -1,31 +1,33 @@
 use crate::operator::version10::new_map_3::fixed_table::{ReadOnlyFixedTable, WritableFixedTable};
-use crate::operator::version10::new_map_3::group::group8::Group8;
+use crate::operator::version10::new_map_3::group::group8_reserve_zero::Group8ReserveZero;
 use crate::operator::version10::new_map_3::utils::atomic::AsAtomic;
 use crate::operator::version10::new_map_3::utils::write_notify_cell::WriteNotifyCell;
-use std::fmt::Debug;
 use std::future::Future;
-use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::atomic::{fence, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+use crate::operator::version10::new_map_3::group::group_strategy::{GroupStrategy, IterableGroupStrategy};
+use crate::operator::version10::new_map_3::group::probe_hybrid::HybridProbeSequence;
+use crate::operator::version10::new_map_3::group::probe_sequence::ProbeSequence;
+// type Group = Group8;
 
-type Group = Group8;
-
-pub type ReadOnlyTable<V> = ReadOnlyFixedTable<V, Group>;
+pub type ReadOnlyTable<V, G = Group8ReserveZero, P = HybridProbeSequence<8>> = ReadOnlyFixedTable<V, G, P>;
 
 // Just a data wrapper around a fixed table with some other information
-struct InnerTable<V> {
+struct InnerTable<V, G, P> {
     // TODO change to smaller type
     generation: u32,
     // consumed_capacity: AtomicUsize,
     // remaining_capacity: AtomicI64,
     total_capacity_of_previous_tables: usize,
-    table: WritableFixedTable<V, Group>,
+    table: WritableFixedTable<V, G, P>,
 }
 
-impl <V> InnerTable<V>
-where V: Default + Copy + AsAtomic + PartialEq + 'static
+impl <V, G, P> InnerTable<V, G, P>
+where V: Default + Copy + AsAtomic + PartialEq + 'static,
+      G: GroupStrategy + 'static,
+      P: ProbeSequence + 'static,
 {
     fn new(generation: u32, capacity: usize, total_capacity_of_previous_tables: usize) -> Self {
         // TODO check capacity is greater than 0 and less than a maximum value. Keeping in mind that
@@ -43,31 +45,33 @@ where V: Default + Copy + AsAtomic + PartialEq + 'static
     }
 }
 
-struct SharedTableBuilder<V> {
-    current_table: AtomicPtr<InnerTable<V>>,
-    full_tables: Mutex<Vec<Box<InnerTable<V>>>>,
+struct SharedTableBuilder<V, G, P> {
+    current_table: AtomicPtr<InnerTable<V, G, P>>,
+    full_tables: Mutex<Vec<Box<InnerTable<V, G, P>>>>,
     total_size_during_compaction: AtomicUsize,
     migration_state: AtomicU64,
-    compaction_elements: WriteNotifyCell<Arc<Compactor<V>>>,
+    compaction_elements: WriteNotifyCell<Arc<Compactor<V, G, P>>>,
 }
 
-struct Compactor<V> {
-    destination_table: WritableFixedTable<V, Group>,
-    source_tables: Vec<WritableFixedTable<V, Group>>,
+struct Compactor<V, G, P> {
+    destination_table: WritableFixedTable<V, G, P>,
+    source_tables: Vec<WritableFixedTable<V, G, P>>,
     next_partition_counter: AtomicUsize,
     // (source table index, partition index, partition count)
     source_table_partitions: Vec<(usize, usize, usize)>,
-    completed_table_write_cell: WriteNotifyCell<Arc<ReadOnlyFixedTable<V, Group>>>
+    completed_table_write_cell: WriteNotifyCell<Arc<ReadOnlyFixedTable<V, G, P>>>
 }
 
-pub struct CompactionTable<V> {
-    compactor_result: Result<Arc<Compactor<V>>, Pin<Box<dyn Future<Output=Arc<Compactor<V>>> + Send>>>,
+pub struct CompactionTable<V, G, P> {
+    compactor_result: Result<Arc<Compactor<V, G, P>>, Pin<Box<dyn Future<Output=Arc<Compactor<V, G, P>>> + Send>>>,
 }
 
-impl <V> CompactionTable<V>
-where V: Default + Copy + AsAtomic + PartialEq + 'static
+impl <V, G, P> CompactionTable<V, G, P>
+where V: Default + Copy + AsAtomic + PartialEq + 'static,
+      G: GroupStrategy + IterableGroupStrategy + 'static,
+      P: ProbeSequence + 'static,
 {
-    pub async fn participate_in_compaction(self) -> (Vec<(V, V)>, impl Future<Output=Arc<ReadOnlyFixedTable<V, Group>>>) {
+    pub async fn participate_in_compaction(self) -> (Vec<(V, V)>, impl Future<Output=Arc<ReadOnlyFixedTable<V, G, P>>>) {
         let compaction_elements = match self.compactor_result {
             Ok(compaction_elements) => compaction_elements,
             Err(future) => future.await,
@@ -131,9 +135,9 @@ where V: Default + Copy + AsAtomic + PartialEq + 'static
 }
 
 #[derive(Clone)]
-pub struct WriteOnlyTable<V> {
-    write_state: Arc<SharedTableBuilder<V>>,
-    current_table_cache: *mut InnerTable<V>,
+pub struct WriteOnlyTable<V, G = Group8ReserveZero, P = HybridProbeSequence<8>> {
+    write_state: Arc<SharedTableBuilder<V, G, P>>,
+    current_table_cache: *mut InnerTable<V, G, P>,
     writes_to_current_table: usize,
     total_writes: usize,
     // loaded_tags_buffer: [u8; 16],
@@ -150,11 +154,13 @@ impl<V> WriteOnlyTable<V> {
     }
 }
 
-unsafe impl <V: Sync> Sync for WriteOnlyTable<V> {}
-unsafe impl <V: Send> Send for WriteOnlyTable<V> {}
+unsafe impl <V: Sync, G, P> Sync for WriteOnlyTable<V, G, P> {}
+unsafe impl <V: Send, G, P> Send for WriteOnlyTable<V, G, P> {}
 
-impl <V> WriteOnlyTable<V>
-where V: Default + Copy + AsAtomic + PartialEq + Send + Sync + 'static
+impl <V, G, P> WriteOnlyTable<V, G, P>
+where V: Default + Copy + AsAtomic + PartialEq + Send + Sync + 'static,
+      G: GroupStrategy + IterableGroupStrategy + 'static,
+      P: ProbeSequence + 'static,
 {
     pub fn new() -> Self {
         let compaction_elements = WriteNotifyCell::new();
@@ -176,11 +182,11 @@ where V: Default + Copy + AsAtomic + PartialEq + Send + Sync + 'static
         }
     }
 
-    pub async fn compact(self) -> Arc<ReadOnlyFixedTable<V, Group>> {
+    pub async fn compact(self) -> Arc<ReadOnlyFixedTable<V, G, P>> {
         self.finish().participate_in_compaction().await.1.await
     }
 
-    pub fn finish(self) -> CompactionTable<V> {
+    pub fn finish(self) -> CompactionTable<V, G, P> {
         self.write_state.total_size_during_compaction.fetch_add(self.total_writes, Ordering::Release);
 
         let compaction_elements_reader = self.write_state.compaction_elements.get_reader();
@@ -241,7 +247,7 @@ where V: Default + Copy + AsAtomic + PartialEq + Send + Sync + 'static
                 drop(compaction_elements_reader);
 
                 compaction_elements
-            }) as Pin<Box<dyn Future<Output=Arc<Compactor<V>>> + Send>>)
+            }) as Pin<Box<dyn Future<Output=Arc<Compactor<V, G, P>>> + Send>>)
         };
 
         CompactionTable { compactor_result }
@@ -256,7 +262,7 @@ where V: Default + Copy + AsAtomic + PartialEq + Send + Sync + 'static
             }
         }
 
-        return self.insert_non_cached(hash, value);
+        self.insert_non_cached(hash, value)
     }
 
     #[inline(always)]
@@ -325,9 +331,9 @@ where V: Default + Copy + AsAtomic + PartialEq + Send + Sync + 'static
 
     fn create_new_table(
         &mut self,
-        current_table: &InnerTable<V>,
+        current_table: &InnerTable<V, G, P>,
         overflowed_capacity: usize,
-    ) -> *mut InnerTable<V> {
+    ) -> *mut InnerTable<V, G, P> {
         let existing_capacity = current_table.table.capacity() + current_table.total_capacity_of_previous_tables;
         // Tables grow by two each time
         let desired_capacity = 2 * (existing_capacity + overflowed_capacity);
@@ -385,11 +391,11 @@ where V: Default + Copy + AsAtomic + PartialEq + Send + Sync + 'static
         current_generation: u32,
         desired_capacity: usize,
         existing_capacity: usize,
-    ) -> Result<*mut InnerTable<V>, ClaimMigrationFailure> {
+    ) -> Result<*mut InnerTable<V, G, P>, ClaimMigrationFailure> {
         self.claim_migration_relaxed(current_generation)?;
 
         let next_generation = current_generation + 1;
-        let new_table_box = Box::new(InnerTable::<V>::new(next_generation, desired_capacity, existing_capacity));
+        let new_table_box = Box::new(InnerTable::<V, G, P>::new(next_generation, desired_capacity, existing_capacity));
         // println!("Created new table with generation {}, capacity {}, from desired capacity {}", next_generation, new_table_box.table.size(), desired_capacity);
         let new_table = Box::into_raw(new_table_box);
         let previous_table = self.write_state.current_table.swap(new_table, Ordering::AcqRel);
@@ -470,6 +476,8 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
     use std::iter;
+    use crate::operator::version10::new_map_3::group::group8_reserve_zero::Group8ReserveZero;
+    use crate::operator::version10::new_map_3::group::probe_hybrid::HybridProbeSequence;
 
     #[tokio::test(flavor = "multi_thread")]
     pub async fn make_single_threaded() {
@@ -478,7 +486,7 @@ mod tests {
             .map(|_| rng.gen())
             .map(|i| (i, i as usize))
             .collect::<Vec<_>>();
-        let mut table = WriteOnlyTable::new();
+        let mut table = WriteOnlyTable::<usize, Group8ReserveZero, HybridProbeSequence<8>>::new();
         for (hash, value) in &pairs {
             assert_eq!(table.insert(*hash, *value), None);
         }

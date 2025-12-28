@@ -1,14 +1,12 @@
 use std::arch::aarch64;
 use std::cmp::max;
 use crate::operator::version10::new_map_3::group::group_strategy::GroupStrategy;
-use crate::operator::version10::new_map_3::group::probe_hybrid::HybridProbeSequence;
 use crate::operator::version10::new_map_3::group::iterable_bit_mask::IterableBitMaskIntrinsics16x4;
 
-impl GroupStrategy for Group16 {
+impl GroupStrategy for Group16ReserveZero {
     const GROUP_SIZE: usize = 16;
     const EMPTY_TAG: u8 = 0;
-    type Group = Group16;
-    type ProbeSeq = HybridProbeSequence<16>;
+    type Group = Group16ReserveZero;
     type SliceType = [u8; 16];
 
     #[inline(always)]
@@ -31,10 +29,6 @@ impl GroupStrategy for Group16 {
         group.find(search_tag)
     }
 
-    unsafe fn match_tag_as_u8(group: &Self::Group, search_tag: u8) -> u8 {
-        todo!()
-    }
-
     #[inline(always)]
     unsafe fn match_empty(group: &Self::Group) -> impl IntoIterator<Item=usize> {
         group.match_empty()
@@ -52,9 +46,9 @@ impl GroupStrategy for Group16 {
 }
 
 #[derive(Copy, Clone)]
-pub struct Group16(aarch64::uint8x16_t);
+pub struct Group16ReserveZero(aarch64::uint8x16_t);
 
-impl Group16 {
+impl Group16ReserveZero {
     #[inline(always)]
     pub unsafe fn load(tags: &[u8]) -> Self {
         debug_assert!(tags.len() >= 16);

@@ -13,7 +13,6 @@ impl GroupStrategy for Group4 {
     const GROUP_SIZE: usize = 4;
     const EMPTY_TAG: u8 = 0;
     type Group = aarch64::uint8x8_t;
-    type ProbeSeq = HybridProbeSequence<4>;
     type SliceType = [u8; 4];
 
     #[inline(always)]
@@ -54,17 +53,6 @@ impl GroupStrategy for Group4 {
         let output = aarch64::vget_lane_u32::<0>(aarch64::vreinterpret_u32_u8(match_result));
 
         IterableBitMaskIntrinsics8x4::new(output)
-    }
-
-    unsafe fn match_tag_as_u8(group: &Self::Group, search_tag: u8) -> u8 {
-        // Replicate the search value 8 times into a 64-bit register
-        let search_register = aarch64::vld1_dup_u8(&search_tag);
-
-        // Compare the registers together. For each u8 value in the 64-bit register, if the values
-        // match, the output will have all 1s, otherwise all 0s.
-        let match_result = aarch64::vceq_u8(*group, search_register);
-
-        compress_match_result(match_result)
     }
 
     #[inline(always)]

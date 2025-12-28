@@ -2,38 +2,38 @@ use std::arch::aarch64;
 use std::cmp::max;
 use crate::operator::version10::new_map_3::group::group_strategy::{BulkGroupStrategy, BulkGroupStrategy32, BulkGroupStrategyN, GroupStrategy, IterableGroupStrategy};
 use crate::operator::version10::new_map_3::group::probe_hybrid::HybridProbeSequence;
-use crate::operator::version10::new_map_3::group::utils::compress_match_result;
 use crate::operator::version10::new_map_3::group::iterable_bit_mask::IterableBitMaskIntrinsics8x8;
 
-impl GroupStrategy for Group8 {
+// Takes the top 8 bits of the hash, reserving 0 as the empty tag
+#[derive(Copy, Clone)]
+pub struct Group8ReserveZero(aarch64::uint8x8_t);
+
+impl GroupStrategy for Group8ReserveZero {
     const GROUP_SIZE: usize = 8;
     const EMPTY_TAG: u8 = 0;
     type Group = Self;
-    type ProbeSeq = HybridProbeSequence<8>;
     type SliceType = [u8; 8];
 
     #[inline(always)]
-    fn get_tag(hash: u64) -> u8 {
-        max((hash >> 56) as u8, 1)
-    }
-
-    #[inline(always)]
     unsafe fn load(tags: &[u8]) -> Self::Group {
-        Self::load(tags)
+        debug_assert!(tags.len() >= 8);
+        Self(aarch64::vld1_u8(&tags[0]))
     }
 
     #[inline(always)]
     unsafe fn load_ptr(tags: *const u8) -> Self::Group {
-        Self::load_ptr(tags)
+        Self(aarch64::vld1_u8(tags))
+    }
+
+    #[inline(always)]
+    fn get_tag(hash: u64) -> u8 {
+        // Takes the top 8 bits
+        max((hash >> 56) as u8, 1)
     }
 
     #[inline(always)]
     unsafe fn match_tag(group: &Self::Group, search_tag: u8) -> impl IntoIterator<Item=usize> {
         group.find(search_tag)
-    }
-
-    unsafe fn match_tag_as_u8(group: &Self::Group, search_tag: u8) -> u8 {
-        group.match_tag_as_u8(search_tag)
     }
 
     #[inline(always)]
@@ -52,86 +52,43 @@ impl GroupStrategy for Group8 {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct Group8(aarch64::uint8x8_t);
-
-impl Group8 {
-    #[inline(always)]
-    pub unsafe fn load(tags: &[u8]) -> Self {
-        debug_assert!(tags.len() >= 8);
-        Self(aarch64::vld1_u8(&tags[0]))
-    }
-
-    #[inline(always)]
-    pub unsafe fn load_ptr(tags: *const u8) -> Self {
-        Self(aarch64::vld1_u8(tags))
-    }
-
+impl Group8ReserveZero {
     #[inline(always)]
     pub unsafe fn find(&self, search_tag: u8) -> IterableBitMaskIntrinsics8x8 {
-        // Replicate the search value 8 times into a 64-bit register
-        let search_register = aarch64::vld1_dup_u8(&search_tag);
-
-        // Compare the registers together. For each u8 value in the 64-bit register, if the values
-        // match, the output will have all 1s, otherwise all 0s.
-        let match_result = aarch64::vceq_u8(self.0, search_register);
-
-        let output = aarch64::vget_lane_u64::<0>(aarch64::vreinterpret_u64_u8(match_result));
-
+        let output = self.find_raw(&search_tag);
         IterableBitMaskIntrinsics8x8::new(output)
-    }
-
-    // #[inline(always)]
-    // pub unsafe fn findx2(&self, search_tag: &[u8; 2]) -> IterableBitMaskIntrinsics8x8 {
-    //     // Replicate the search value 8 times into a 64-bit register
-    //     let search_register = aarch64::vld1q_dup_u8(&search_tag[0]);
-    //     aarch64::vld1q_lane_u8::<1>(&search_tag[1], search_register);
-    //
-    //     // Compare the registers together. For each u8 value in the 64-bit register, if the values
-    //     // match, the output will have all 1s, otherwise all 0s.
-    //     let match_result = aarch64::vceq_u8(self.0, search_register);
-    //
-    //     let output = aarch64::vget_lane_u64::<0>(aarch64::vreinterpret_u64_u8(match_result));
-    //
-    //     IterableBitMaskIntrinsics8x8::new(output)
-    // }
-
-    #[inline(always)]
-    pub unsafe fn match_tag_as_u8(&self, search_tag: u8) -> u8 {
-        // Replicate the search value 8 times into a 64-bit register
-        let search_register = aarch64::vld1_dup_u8(&search_tag);
-
-        // Compare the registers together. For each u8 value in the 64-bit register, if the values
-        // match, the output will have all 1s, otherwise all 0s.
-        let match_result = aarch64::vceq_u8(self.0, search_register);
-
-        compress_match_result(match_result)
     }
 
     #[inline(always)]
     pub unsafe fn match_empty(&self) -> IterableBitMaskIntrinsics8x8 {
-        self.find(0)
+        self.find(Self::EMPTY_TAG)
     }
-}
 
-impl IterableGroupStrategy for Group8 {
-    type It = IterableBitMaskIntrinsics8x8;
-
-    unsafe fn match_non_empty(group: &Self::Group) -> Self::It {
+    #[inline(always)]
+    unsafe fn find_raw(&self, search_tag: &u8) -> u64 {
         // Replicate the search value 8 times into a 64-bit register
-        let search_register = aarch64::vld1_dup_u8(&0);
+        let search_register = aarch64::vld1_dup_u8(search_tag);
 
         // Compare the registers together. For each u8 value in the 64-bit register, if the values
         // match, the output will have all 1s, otherwise all 0s.
-        let match_result = aarch64::vceq_u8(group.0, search_register);
+        let match_result = aarch64::vceq_u8(self.0, search_register);
 
-        let output = aarch64::vget_lane_u64::<0>(aarch64::vreinterpret_u64_u8(match_result));
+        aarch64::vget_lane_u64::<0>(aarch64::vreinterpret_u64_u8(match_result))
+    }
+}
 
+impl IterableGroupStrategy for Group8ReserveZero {
+    type It = IterableBitMaskIntrinsics8x8;
+
+    #[inline(always)]
+    unsafe fn match_non_empty(group: &Self::Group) -> Self::It {
+        let output = group.find_raw(&Self::EMPTY_TAG);
+        // Invert the output to find non-empty slots
         IterableBitMaskIntrinsics8x8::new(!output)
     }
 }
 
-impl BulkGroupStrategyN for Group8 {
+impl BulkGroupStrategyN for Group8ReserveZero {
     type ProbeSeq = HybridProbeSequence<8>;
     type TagIt = IterableBitMaskIntrinsics8x8;
 
@@ -220,7 +177,7 @@ impl BulkGroupStrategyN for Group8 {
     }
 }
 
-impl BulkGroupStrategy32 for Group8 {
+impl BulkGroupStrategy32 for Group8ReserveZero {
     type ProbeSeq = HybridProbeSequence<8>;
 
     #[inline(always)]
@@ -248,7 +205,7 @@ impl BulkGroupStrategy32 for Group8 {
     }
 }
 
-impl BulkGroupStrategy for Group8 {
+impl BulkGroupStrategy for Group8ReserveZero {
     type ProbeSeq = HybridProbeSequence<8>;
 
     // unsafe fn get_tags_3(hashes: &[u64; 8]) -> [u8; 8] {
@@ -401,7 +358,7 @@ impl BulkGroupStrategy for Group8 {
 
 #[cfg(test)]
 mod group8_bulk_n_tests {
-    use crate::operator::version10::new_map_3::group::group8::Group8;
+    use crate::operator::version10::new_map_3::group::group8_reserve_zero::Group8ReserveZero;
     use crate::operator::version10::new_map_3::group::group_strategy::BulkGroupStrategyN;
 
     #[test]
@@ -429,7 +386,7 @@ mod group8_bulk_n_tests {
         ];
         let groups: [*const u8; 8] = [data.as_ptr(); 8];
 
-        let iterators = unsafe { Group8::match_tag_n::<8>(&groups, &search_tags) };
+        let iterators = unsafe { Group8ReserveZero::match_tag_n::<8>(&groups, &search_tags) };
         let indices = iterators.map(|it| it.into_iter().collect::<Vec<_>>());
         assert_eq!(indices, [
             vec![0, 7],
@@ -447,7 +404,7 @@ mod group8_bulk_n_tests {
 
 #[cfg(test)]
 mod group8_tests {
-    use crate::operator::version10::new_map_3::group::group8::Group8;
+    use crate::operator::version10::new_map_3::group::group8_reserve_zero::Group8ReserveZero;
     use crate::operator::version10::new_map_3::group::group_strategy::BulkGroupStrategy;
 
     #[test]
@@ -462,7 +419,7 @@ mod group8_tests {
             println!("0b{:0>64b} : {}", hash, hash >> 56);
         }
 
-        let tags = unsafe { Group8::get_tags(&hashes) };
+        let tags = unsafe { Group8ReserveZero::get_tags(&hashes) };
         assert_eq!(tags, [1, 1, 2, 4, 8, 16, 32, 64]);
     }
 }

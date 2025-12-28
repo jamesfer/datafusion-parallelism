@@ -1,39 +1,45 @@
 use std::arch::aarch64;
 use crate::operator::version10::new_map_3::group::probe_sequence::{ProbeSequence, ProbeSequenceBulk, ProbeSequenceBulk32, ProbeSequenceBulkN};
 
-pub struct HybridProbeSequence<const GROUP_SIZE: usize>;
+#[derive(Clone)]
+pub struct HybridProbeSequenceSlide<const GROUP_SIZE: usize, const BITS: usize, const SKIP: usize>;
 
-impl <const GROUP_SIZE: usize> HybridProbeSequence<GROUP_SIZE> {
+impl <const GROUP_SIZE: usize, const BITS: usize, const SKIP: usize> ProbeSequence for HybridProbeSequenceSlide<GROUP_SIZE, BITS, SKIP> {
+    const GROUP_SIZE: usize = GROUP_SIZE;
+
     #[inline(always)]
-    pub fn start(hash: u64, capacity_mask: usize) -> usize {
-        // debug_assert!((capacity_mask + 1).is_power_of_two());
-
+    fn start_index(hash: u64, capacity_mask: usize) -> usize {
         hash as usize & capacity_mask
     }
 
     #[inline(always)]
-    pub fn next(previous: usize, tag: u8, capacity_mask: usize) -> usize {
-        // debug_assert!((capacity_mask + 1).is_power_of_two());
+    fn next(previous: usize, _: &mut usize, hash: u64, _: u8, capacity_mask: usize) -> usize {
+        let bits = hash << SKIP >> (64 - BITS);
+        // We need to ensure that the lowest bit is 1
+        let stride = (bits * 2 + 1) as usize * GROUP_SIZE;
+        (previous + stride) & capacity_mask
+    }
+}
 
+#[derive(Clone)]
+pub struct HybridProbeSequence<const GROUP_SIZE: usize>;
+
+impl <const GROUP_SIZE: usize> ProbeSequence for HybridProbeSequence<GROUP_SIZE> {
+    const GROUP_SIZE: usize = GROUP_SIZE;
+
+    #[inline(always)]
+    fn start_index(hash: u64, capacity_mask: usize) -> usize {
+        hash as usize & capacity_mask
+    }
+
+    #[inline(always)]
+    fn next(previous: usize, _: &mut usize, _: u64, tag: u8, capacity_mask: usize) -> usize {
         let stride = (tag as usize * 2 + 1) * GROUP_SIZE;
         (previous + stride) & capacity_mask
     }
 }
 
-impl <const GROUP_SIZE: usize> ProbeSequence for HybridProbeSequence<GROUP_SIZE> {
-    #[inline(always)]
-    fn start(hash: u64, capacity_mask: usize) -> (usize, usize) {
-        (HybridProbeSequence::<GROUP_SIZE>::start(hash, capacity_mask), 0)
-    }
-
-    #[inline(always)]
-    fn next(previous: usize, tag: u8, _: &mut usize, capacity_mask: usize) -> usize {
-        HybridProbeSequence::<GROUP_SIZE>::next(previous, tag, capacity_mask)
-    }
-}
-
 impl ProbeSequenceBulk for HybridProbeSequence<8> {
-
     type CapacityMask = aarch64::uint64x2_t;
 
     #[inline(always)]

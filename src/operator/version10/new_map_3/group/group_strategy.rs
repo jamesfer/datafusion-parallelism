@@ -5,31 +5,22 @@ pub trait GroupStrategy {
     const EMPTY_TAG: u8;
 
     type Group;
-    type ProbeSeq: ProbeSequence;
     type SliceType: AsMut<[u8]>;
 
-    #[inline(always)]
-    fn get_tag(hash: u64) -> u8;
-
-    #[inline(always)]
+    // Reads u8 tag values into the group type
     unsafe fn load(tags: &[u8]) -> Self::Group;
-
-    #[inline(always)]
     unsafe fn load_ptr(tags: *const u8) -> Self::Group;
 
-    #[inline(always)]
+    // Extracts the tag from a plain hash
+    fn get_tag(hash: u64) -> u8;
+
+    // Searches the group for a specific tag
     unsafe fn match_tag(group: &Self::Group, search_tag: u8) -> impl IntoIterator<Item=usize>;
-
-    #[inline(always)]
-    unsafe fn match_tag_as_u8(group: &Self::Group, search_tag: u8) -> u8;
-
-    #[inline(always)]
     unsafe fn match_empty(group: &Self::Group) -> impl IntoIterator<Item=usize>;
-
-    #[inline(always)]
     unsafe fn contains_empty_slot(group: &Self::Group) -> bool;
 
-    #[inline(always)]
+    // Allocates a slice equal to group size that can be dereferenced into plain u8 values
+    // This only exists because of some restrictions on generic type parameters
     fn allocate_slice() -> Self::SliceType;
 }
 
@@ -66,4 +57,3 @@ pub trait BulkGroupStrategyN: GroupStrategy {
     #[inline(always)]
     unsafe fn match_tag_1(group: &Self::Group, search_tag: u8) -> Self::TagIt;
 }
-
