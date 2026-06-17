@@ -3,8 +3,10 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion_common::{DataFusionError, JoinType};
+use datafusion::error::Result;
 use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_plan::joins::utils::{build_join_schema, JoinFilter};
+use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use crate::operator::probe_lookup_implementation::full::FullJoinProbeLookupStream;
 use crate::operator::probe_lookup_implementation::inner::InnerJoinProbeLookupStream;
 use crate::operator::probe_lookup_implementation::left_anti::LeftAntiProbeLookupStream;
@@ -103,81 +105,105 @@ impl ProbeLookupStreamImplementation {
         filter: Option<JoinFilter>,
         build_side_records: RecordBatch,
         read_only_join_map: Lookup,
-    ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
+    ) -> Result<SendableRecordBatchStream>
         where Lookup: IndexLookup<u64> + Sync + Send + 'static {
-        match self {
-            ProbeLookupStreamImplementation::InnerJoin(implementation) => implementation.streaming_probe_lookup(
-                output_schema,
-                probe_stream,
-                probe_expressions,
-                build_expressions,
-                filter,
-                build_side_records,
-                read_only_join_map,
-            ),
-            ProbeLookupStreamImplementation::FullJoin(implementation) => implementation.streaming_probe_lookup(
-                output_schema,
-                probe_stream,
-                probe_expressions,
-                build_expressions,
-                filter,
-                build_side_records,
-                read_only_join_map,
-            ),
-            ProbeLookupStreamImplementation::LeftOuter(implementation) => implementation.streaming_probe_lookup(
-                output_schema,
-                probe_stream,
-                probe_expressions,
-                build_expressions,
-                filter,
-                build_side_records,
-                read_only_join_map,
-            ),
-            ProbeLookupStreamImplementation::LeftSemi(implementation) => implementation.streaming_probe_lookup(
-                output_schema,
-                probe_stream,
-                probe_expressions,
-                build_expressions,
-                filter,
-                build_side_records,
-                read_only_join_map,
-            ),
-            ProbeLookupStreamImplementation::LeftAnti(implementation) => implementation.streaming_probe_lookup(
-                output_schema,
-                probe_stream,
-                probe_expressions,
-                build_expressions,
-                filter,
-                build_side_records,
-                read_only_join_map,
-            ),
-            ProbeLookupStreamImplementation::RightAnti(implementation) => implementation.streaming_probe_lookup(
-                output_schema,
-                probe_stream,
-                probe_expressions,
-                build_expressions,
-                filter,
-                build_side_records,
-                read_only_join_map,
-            ),
-            ProbeLookupStreamImplementation::RightOuter(implementation) => implementation.streaming_probe_lookup(
-                output_schema,
-                probe_stream,
-                probe_expressions,
-                build_expressions,
-                filter,
-                build_side_records,
-                read_only_join_map,
-            ),
-            ProbeLookupStreamImplementation::RightSemi(implementation) => implementation.streaming_probe_lookup(
-                output_schema,
-                probe_stream,
-                probe_expressions,
-                build_expressions,
-                filter,
-                build_side_records,
-                read_only_join_map,
-            ),
-        }
+        Ok(match self {
+            ProbeLookupStreamImplementation::InnerJoin(implementation) => {
+                let stream = implementation.streaming_probe_lookup(
+                    output_schema.clone(),
+                    probe_stream,
+                    probe_expressions,
+                    build_expressions,
+                    filter,
+                    build_side_records,
+                    read_only_join_map,
+                )?;
+                Box::pin(RecordBatchStreamAdapter::new(output_schema, stream))
+            },
+            ProbeLookupStreamImplementation::FullJoin(implementation) => {
+                let stream = implementation.streaming_probe_lookup(
+                    output_schema.clone(),
+                    probe_stream,
+                    probe_expressions,
+                    build_expressions,
+                    filter,
+                    build_side_records,
+                    read_only_join_map,
+                )?;
+                Box::pin(RecordBatchStreamAdapter::new(output_schema, stream))
+            },
+            ProbeLookupStreamImplementation::LeftOuter(implementation) => {
+                let stream = implementation.streaming_probe_lookup(
+                    output_schema.clone(),
+                    probe_stream,
+                    probe_expressions,
+                    build_expressions,
+                    filter,
+                    build_side_records,
+                    read_only_join_map,
+                )?;
+                Box::pin(RecordBatchStreamAdapter::new(output_schema, stream))
+            },
+            ProbeLookupStreamImplementation::LeftSemi(implementation) => {
+                let stream = implementation.streaming_probe_lookup(
+                    output_schema.clone(),
+                    probe_stream,
+                    probe_expressions,
+                    build_expressions,
+                    filter,
+                    build_side_records,
+                    read_only_join_map,
+                )?;
+                Box::pin(RecordBatchStreamAdapter::new(output_schema, stream))
+            },
+            ProbeLookupStreamImplementation::LeftAnti(implementation) => {
+                let stream = implementation.streaming_probe_lookup(
+                    output_schema.clone(),
+                    probe_stream,
+                    probe_expressions,
+                    build_expressions,
+                    filter,
+                    build_side_records,
+                    read_only_join_map,
+                )?;
+                Box::pin(RecordBatchStreamAdapter::new(output_schema, stream))
+            },
+            ProbeLookupStreamImplementation::RightAnti(implementation) => {
+                let stream = implementation.streaming_probe_lookup(
+                    output_schema.clone(),
+                    probe_stream,
+                    probe_expressions,
+                    build_expressions,
+                    filter,
+                    build_side_records,
+                    read_only_join_map,
+                )?;
+                Box::pin(RecordBatchStreamAdapter::new(output_schema, stream))
+            },
+            ProbeLookupStreamImplementation::RightOuter(implementation) => {
+                let stream = implementation.streaming_probe_lookup(
+                    output_schema.clone(),
+                    probe_stream,
+                    probe_expressions,
+                    build_expressions,
+                    filter,
+                    build_side_records,
+                    read_only_join_map,
+                )?;
+                Box::pin(RecordBatchStreamAdapter::new(output_schema, stream))
+            },
+            ProbeLookupStreamImplementation::RightSemi(implementation) => {
+                let stream = implementation.streaming_probe_lookup(
+                    output_schema.clone(),
+                    probe_stream,
+                    probe_expressions,
+                    build_expressions,
+                    filter,
+                    build_side_records,
+                    read_only_join_map,
+                )?;
+                Box::pin(RecordBatchStreamAdapter::new(output_schema, stream))
+            },
+        })
     }
 }

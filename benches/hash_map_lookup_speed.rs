@@ -1,3 +1,5 @@
+#![feature(iter_array_chunks)]
+
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,9 +16,9 @@ use tokio::runtime::{Builder, Runtime};
 use datafusion_parallelism::operator::version10::new_map_3::group::group8_reserve_zero::Group8ReserveZero;
 use datafusion_parallelism::operator::version10::new_map_3::group::group8_spread_empty::Group8SpreadEmpty;
 use datafusion_parallelism::operator::version10::new_map_3::group::group8_swiss_plus::Group8SwissPlus;
-use datafusion_parallelism::operator::version10::new_map_3::group::group_strategy::{GroupStrategy, IterableGroupStrategy};
+use datafusion_parallelism::operator::version10::new_map_3::group::group_strategy::{BulkGroupStrategyN, GroupStrategy, IterableGroupStrategy};
 use datafusion_parallelism::operator::version10::new_map_3::group::probe_hybrid::{HybridProbeSequence, HybridProbeSequenceSlide};
-use datafusion_parallelism::operator::version10::new_map_3::group::probe_sequence::ProbeSequence;
+use datafusion_parallelism::operator::version10::new_map_3::group::probe_sequence::{ProbeSequence, ProbeSequenceBulkN};
 use datafusion_parallelism::operator::version10::new_map_3::group::probe_swiss::SwissTableProbeSeq;
 
 const PARTITIONS: usize = 8;
@@ -134,16 +136,15 @@ fn criterion_benchmark(c: &mut Criterion) {
                         &mut rng,
                     );
                     assert_eq!(lookup_keys.len(), scenario.lookup_count);
-                    (raw_table, lookup_keys)
+                    let output = vec![0usize; lookup_keys.len()];
+                    (raw_table, lookup_keys, output)
                 },
-                |(table, lookup_keys)| {
-                    let mut acc = 0usize;
-                    for key in lookup_keys.iter() {
+                |(table, lookup_keys, output)| {
+                    for (i, key) in lookup_keys.iter().enumerate() {
                         if let Some(value) = lookup_raw(&table, *key) {
-                            acc = acc.wrapping_add(value);
+                            output[i] = value;
                         }
                     }
-                    black_box(acc)
                 },
                 LargeInput,
             );
@@ -154,37 +155,49 @@ fn criterion_benchmark(c: &mut Criterion) {
                 new_map_benchmark::<Group8ReserveZero, HybridProbeSequence<8>>(&runtime, scenario, b);
             });
 
-            group.bench_function(BenchmarkId::new("new_map_3 (spread empty, hybrid probe)", scenario.name()), |b| {
-                new_map_benchmark::<Group8SpreadEmpty, HybridProbeSequence<8>>(&runtime, scenario, b);
-            });
+            // group.bench_function(BenchmarkId::new("bulk 4 new_map_3 (reserve zero, hybrid probe)", scenario.name()), |b| {
+            //     new_bulk_map_benchmark::<4, Group8ReserveZero, HybridProbeSequence<8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("bulk 8 new_map_3 (reserve zero, hybrid probe)", scenario.name()), |b| {
+            //     new_bulk_map_benchmark::<8, Group8ReserveZero, HybridProbeSequence<8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("bulk 16 new_map_3 (reserve zero, hybrid probe)", scenario.name()), |b| {
+            //     new_bulk_map_benchmark::<16, Group8ReserveZero, HybridProbeSequence<8>>(&runtime, scenario, b);
+            // });
 
-            group.bench_function(BenchmarkId::new("new_map_3 (top7, hybrid probe)", scenario.name()), |b| {
-                new_map_benchmark::<Group8SwissPlus, HybridProbeSequence<8>>(&runtime, scenario, b);
-            });
-
-            group.bench_function(BenchmarkId::new("new_map_3 (reserve zero, hybrid probe slide 8)", scenario.name()), |b| {
-                new_map_benchmark::<Group8ReserveZero, HybridProbeSequenceSlide<8, 8, 8>>(&runtime, scenario, b);
-            });
-
-            group.bench_function(BenchmarkId::new("new_map_3 (spread empty, hybrid probe slide 8)", scenario.name()), |b| {
-                new_map_benchmark::<Group8SpreadEmpty, HybridProbeSequenceSlide<8, 8, 8>>(&runtime, scenario, b);
-            });
-
-            group.bench_function(BenchmarkId::new("new_map_3 (top7, hybrid probe slide 8)", scenario.name()), |b| {
-                new_map_benchmark::<Group8SwissPlus, HybridProbeSequenceSlide<8, 8, 8>>(&runtime, scenario, b);
-            });
-
-            group.bench_function(BenchmarkId::new("new_map_3 (reserve zero, swiss probe)", scenario.name()), |b| {
-                new_map_benchmark::<Group8ReserveZero, SwissTableProbeSeq<8>>(&runtime, scenario, b);
-            });
-
-            group.bench_function(BenchmarkId::new("new_map_3 (spread empty, swiss probe)", scenario.name()), |b| {
-                new_map_benchmark::<Group8SpreadEmpty, SwissTableProbeSeq<8>>(&runtime, scenario, b);
-            });
-
-            group.bench_function(BenchmarkId::new("new_map_3 (top7, swiss probe)", scenario.name()), |b| {
-                new_map_benchmark::<Group8SwissPlus, SwissTableProbeSeq<8>>(&runtime, scenario, b);
-            });
+            // group.bench_function(BenchmarkId::new("new_map_3 (spread empty, hybrid probe)", scenario.name()), |b| {
+            //     new_map_benchmark::<Group8SpreadEmpty, HybridProbeSequence<8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("new_map_3 (top7, hybrid probe)", scenario.name()), |b| {
+            //     new_map_benchmark::<Group8SwissPlus, HybridProbeSequence<8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("new_map_3 (reserve zero, hybrid probe slide 8)", scenario.name()), |b| {
+            //     new_map_benchmark::<Group8ReserveZero, HybridProbeSequenceSlide<8, 8, 8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("new_map_3 (spread empty, hybrid probe slide 8)", scenario.name()), |b| {
+            //     new_map_benchmark::<Group8SpreadEmpty, HybridProbeSequenceSlide<8, 8, 8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("new_map_3 (top7, hybrid probe slide 8)", scenario.name()), |b| {
+            //     new_map_benchmark::<Group8SwissPlus, HybridProbeSequenceSlide<8, 8, 8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("new_map_3 (reserve zero, swiss probe)", scenario.name()), |b| {
+            //     new_map_benchmark::<Group8ReserveZero, SwissTableProbeSeq<8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("new_map_3 (spread empty, swiss probe)", scenario.name()), |b| {
+            //     new_map_benchmark::<Group8SpreadEmpty, SwissTableProbeSeq<8>>(&runtime, scenario, b);
+            // });
+            //
+            // group.bench_function(BenchmarkId::new("new_map_3 (top7, swiss probe)", scenario.name()), |b| {
+            //     new_map_benchmark::<Group8SwissPlus, SwissTableProbeSeq<8>>(&runtime, scenario, b);
+            // });
         }
     }
 
@@ -204,16 +217,50 @@ fn new_map_benchmark<G: GroupStrategy + IterableGroupStrategy + 'static, P: Prob
                 &mut rng,
             );
             assert_eq!(lookup_keys.len(), scenario.lookup_count);
-            (write_only_table, lookup_keys)
+            let output = vec![0usize; lookup_keys.len()];
+            (write_only_table, lookup_keys, output)
         },
-        |(write_only_table, lookup_keys)| {
-            let mut acc = 0usize;
-            for key in lookup_keys.iter() {
+        |(write_only_table, lookup_keys, output)| {
+            for (i, key) in lookup_keys.iter().enumerate() {
                 if let Some(value) = write_only_table.get(*key) {
-                    acc = acc.wrapping_add(*value);
+                    output[i] = *value;
                 }
             }
-            black_box(acc)
+        },
+        LargeInput,
+    );
+}
+
+fn new_bulk_map_benchmark<const N: usize, G: BulkGroupStrategyN + IterableGroupStrategy + 'static, P: ProbeSequence + ProbeSequenceBulkN + 'static>(runtime: &Runtime, scenario: Scenario, b: &mut Bencher) {
+    assert_eq!(scenario.lookup_count % N, 0);
+
+    let mut rng = StdRng::seed_from_u64(RNG_SEED);
+    b.iter_batched_ref(
+        || {
+            let entries = generate_entries(&mut rng, scenario.entries());
+            let read_only_table = build_write_only_table::<G, P>(&runtime, &entries);
+            let lookup_keys = generate_lookup_keys(
+                &entries,
+                scenario.lookup_count,
+                scenario.hit_rate,
+                &mut rng,
+            );
+            assert_eq!(lookup_keys.len(), scenario.lookup_count);
+            let output: Vec<Option<usize>> = vec![None; lookup_keys.len()];
+            (read_only_table, lookup_keys, output)
+        },
+        |(read_only_table, lookup_keys, output)| {
+            for (keys, output) in lookup_keys.iter()
+                .copied()
+                .array_chunks::<N>()
+                .zip(output.iter_mut().array_chunks::<N>()) {
+                read_only_table.get_in_bulk_static_n::<N>(&keys, output);
+            }
+            // for (i, key) in lookup_keys.iter().enumerate() {
+            //     if let Some(value) = read_only_table.get(*key) {
+            //         output[i] = *value;
+            //     }
+            // }
         },
         LargeInput,
     );
@@ -286,8 +333,10 @@ fn build_raw_table(entries: &[(u64, usize)]) -> RawTable<(u64, usize)> {
     table
 }
 
+#[inline]
 fn lookup_raw(table: &RawTable<(u64, usize)>, hash: u64) -> Option<usize> {
-    table
-        .get(hash, |(existing, _)| existing == &hash)
-        .map(|(_, value)| *value)
+    match table.get(hash, |(existing, _)| existing == &hash) {
+        None => None,
+        Some((_, value)) => Some(*value)
+    }
 }

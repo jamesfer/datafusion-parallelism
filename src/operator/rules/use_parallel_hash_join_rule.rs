@@ -12,9 +12,10 @@ use datafusion_physical_expr_common::expressions::column::Column;
 use datafusion_physical_plan::ExecutionPlan;
 use datafusion_physical_plan::joins::{HashJoinExec, PartitionMode};
 use datafusion_physical_plan::projection::ProjectionExec;
-use crate::operator::parallel_hash_join::ParallelHashJoin;
+use crate::operator::parallel_hash_join_exec::ParallelHashJoinExec;
 use crate::operator::probe_lookup_implementation::probe_lookup_implementation::ProbeLookupStreamImplementation;
-use crate::operator::use_work_stealing_repartition_rule::UseWorkStealingRepartitionRule;
+use crate::operator::rules::time_duration::TimeBuildDuration;
+use crate::operator::rules::use_work_stealing_repartition_rule::UseWorkStealingRepartitionRule;
 use crate::parse_sql::JoinReplacement;
 
 pub struct UseParallelHashJoinRule {
@@ -37,6 +38,8 @@ impl UseParallelHashJoinRule {
             optimizer_rules.push(Arc::new(rule));
             optimizer_rules.push(Arc::new(UseWorkStealingRepartitionRule));
             optimizer_rules.push(Arc::new(EnforceDistribution::new()));
+        } else {
+            optimizer_rules.push(Arc::new(TimeBuildDuration));
         }
         optimizer_rules
     }
@@ -96,7 +99,7 @@ impl UseParallelHashJoinRule {
         //     return Err(format!("Projection not supported {:?}", value.projection));
         // }
 
-        let parallel_join = Arc::new(ParallelHashJoin::new(
+        let parallel_join = Arc::new(ParallelHashJoinExec::new(
             value.left.clone(),
             value.right.clone(),
             value.on.clone(),
@@ -114,7 +117,7 @@ impl UseParallelHashJoinRule {
     }
 
     fn wrap_with_projection(
-        parallel_join: Arc<ParallelHashJoin>,
+        parallel_join: Arc<ParallelHashJoinExec>,
         projection: &Vec<usize>,
     ) -> Result<Arc<ProjectionExec>, String> {
         let schema = parallel_join.schema();

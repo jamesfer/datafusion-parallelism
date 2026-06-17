@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::thread::ThreadId;
 use datafusion::arrow;
+use datafusion::error::Result;
 use datafusion::arrow::array::{ArrayRef, RecordBatch};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::error::ArrowError;
@@ -12,10 +13,11 @@ use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_plan::joins::utils::JoinFilter;
 use futures::{stream, TryFutureExt};
 use futures::stream::StreamExt;
+use futures_core::Stream;
 use crate::shared::datafusion_private::{apply_join_filter_to_indices, equal_rows_arr};
 use crate::shared::shared::{calculate_hash, evaluate_expressions, get_matching_indices, take_multiple_record_batch, ProbeBuildIndices};
 use crate::utils::index_lookup::IndexLookup;
-use crate::utils::plain_record_batch_stream::SendablePlainRecordBatchStream;
+use crate::utils::plain_record_batch_stream::{PlainRecordBatchStream, SendablePlainRecordBatchStream};
 
 #[derive(Debug)]
 pub struct InnerJoinProbeLookupStream {
@@ -36,7 +38,7 @@ impl InnerJoinProbeLookupStream {
         filter: Option<JoinFilter>,
         build_side_records: RecordBatch,
         read_only_join_map: Lookup
-    ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
+    ) -> Result<impl PlainRecordBatchStream>
         where Lookup: IndexLookup<u64> + Send + Sync + 'static {
         // let thread_transitions = Arc::new(AtomicU64::new(0));
         // let thread_transitions_clone = Arc::clone(&thread_transitions);
@@ -45,7 +47,7 @@ impl InnerJoinProbeLookupStream {
 
         // let thread_usage: HashMap<usize, Vec<ThreadId>> = HashMap::new();
 
-        Ok(Box::pin(probe_stream
+        let stream = probe_stream
             .map(move |result_probe_batch| -> Result<RecordBatch, DataFusionError> {
                 // let current_thread_id = std::thread::current().id();
                 // if let Some(previous_thread_id) = previous_thread_id {
@@ -54,7 +56,6 @@ impl InnerJoinProbeLookupStream {
                 //     }
                 // }
                 // previous_thread_id = Some(current_thread_id);
-
 
                 lookup_inner_join_probe_batch(
                     &join_schema,
@@ -71,8 +72,9 @@ impl InnerJoinProbeLookupStream {
                     // println!("Thread transitions: {}", thread_transitions.load(std::sync::atomic::Ordering::Relaxed));
                     Ok(stream::empty())
                 }.try_flatten_stream()
-            )
-        ))
+            );
+
+        Ok(stream)
     }
 }
 

@@ -256,11 +256,11 @@ where V: Default + Copy + AsAtomic + PartialEq + Send + Sync + 'static,
     // #[inline]
     pub fn insert(&mut self, hash: u64, value: V) -> Option<V> {
         // Attempt to write to the cached table first
-        if !self.current_table_cache.is_null() {
-            if let Some(value) = self.try_insert_into_cached_table(hash, value) {
-                return value;
-            }
-        }
+        // if !self.current_table_cache.is_null() {
+        //     if let Some(value) = self.try_insert_into_cached_table(hash, value) {
+        //         return value;
+        //     }
+        // }
 
         self.insert_non_cached(hash, value)
     }

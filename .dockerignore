@@ -1,0 +1,18 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# TPC output and data directories
+output/
+output-*/
+tpc/data/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+.DS_Store

@@ -32,7 +32,7 @@ impl GroupStrategy for Group8ReserveZero {
     }
 
     #[inline(always)]
-    unsafe fn match_tag(group: &Self::Group, search_tag: u8) -> impl IntoIterator<Item=usize> {
+    unsafe fn match_tag(group: &Self::Group, search_tag: u8) -> impl IntoIterator<Item=usize> + use<> {
         group.find(search_tag)
     }
 

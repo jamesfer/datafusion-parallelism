@@ -1,4 +1,7 @@
 use std::future::ready;
+use std::time::Instant;
+use async_trait::async_trait;
+use crate::operator::build_implementation::BuildVersion;
 use crate::operator::lookup_consumers::{IndexLookupProvider, SimpleIndexLookupProvider};
 use crate::operator::version10::lookup_implementation_3::Version10Lookup;
 use crate::operator::version10::parallel_join_execution_state::{JoinStateInstance, JoinStateInstances};
@@ -22,23 +25,37 @@ impl Version10 {
             state: JoinStateInstances::new(parallelism, input_schema),
         }
     }
+}
 
-    pub async fn build_lookup_map(
+#[async_trait]
+impl BuildVersion for Version10 {
+    type Map = Version10Lookup;
+
+    async fn build_lookup_map(
         &self,
         partition: usize,
         build_side_stream: SendableRecordBatchStream,
         build_expressions: &Vec<PhysicalExprRef>,
-    ) -> Result<impl IndexLookupProvider, DataFusionError> {
+    ) -> Result<(Version10Lookup, RecordBatch), DataFusionError> {
+        let start_time = Instant::now();
+        let build_schema = build_side_stream.schema();
+        let names = build_schema.fields().iter().map(|f| f.name().clone()).collect::<Vec<_>>();
         let mut state = self.state.take(partition)
             .ok_or(DataFusionError::Internal(format!("State already consumed for partition {}", partition)))?;
 
-        consume_build_side(build_side_stream, &mut state, build_expressions).await?;
+        let (add_time, _) = consume_build_side(build_side_stream, &mut state, build_expressions).await?;
+        let consume_duration = start_time.elapsed();
 
-        let (build_side_records, version_10_lookup) = compact_join_map(
-            state,
-        ).await?;
+        let (build_side_records, version_10_lookup) = compact_join_map(state).await?;
 
-        Ok(SimpleIndexLookupProvider::new(version_10_lookup, build_side_records))
+        let duration = start_time.elapsed();
+        let compact_duration = duration - consume_duration;
+        let add_time_duration = std::time::Duration::from_nanos(add_time as u64);
+        if names.contains(&"o_orderkey".to_string()) {
+            println!("build timing: {:?} ({:?} insert, {:?} compact) for columns: {:?}", duration, add_time_duration, compact_duration, names);
+        }
+
+        Ok((version_10_lookup, build_side_records))
     }
 }
 
@@ -46,26 +63,42 @@ async fn consume_build_side(
     build_side_stream: SendableRecordBatchStream,
     join_state: &mut JoinStateInstance,
     build_expressions: &Vec<PhysicalExprRef>,
-) -> Result<(), DataFusionError> {
+) -> Result<(u128, u128), DataFusionError> {
+    let mut add_time = 0;
+    let mut expr_time = 0;
+
     // Exhaust build side
     build_side_stream.try_for_each(|record_batch| {
         ready(process_input_batch(
             record_batch,
             join_state,
             &build_expressions,
+            &mut add_time,
+            &mut expr_time,
         ))
-    }).await
+    }).await?;
+
+    Ok((add_time, expr_time))
 }
 
 fn process_input_batch(
     input: RecordBatch,
     join_state: &mut JoinStateInstance,
     expressions: &Vec<PhysicalExprRef>,
+    add_time: &mut u128,
+    expr_time: &mut u128,
 ) -> Result<(), DataFusionError> {
+    let start_time = Instant::now();
     let keys = evaluate_expressions(expressions, &input)?;
     let hashes = calculate_hash(&keys)?;
 
+    let expression_duration = start_time.elapsed();
+
     join_state.add(hashes, input);
+    let join_duration = start_time.elapsed() - expression_duration;
+
+    *add_time += join_duration.as_nanos();
+    *expr_time += expression_duration.as_nanos();
 
     Ok(())
 }

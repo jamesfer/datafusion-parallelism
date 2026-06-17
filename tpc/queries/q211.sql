@@ -6,20 +6,22 @@
         max(s_suppkey) as s_suppkey,
         max(s_nationkey) as s_nationkey,
         max(n_nationkey) as n_nationkey,
-        max(o_orderkey) as o_orderkey,
-        max(l_suppkey) as l_suppkey,
-        max(l_orderkey) as l_orderkey,
+--         max(o_orderkey) as o_orderkey,
+--         max(l_suppkey) as l_suppkey,
+--         max(l_orderkey) as l_orderkey,
         count(*) as numwait
-    from supplier,
-        lineitem l1,
-        orders,
+    from
+        supplier,
+--         lineitem l1,
+--         orders,
         nation
-    where s_suppkey = l1.l_suppkey
-      and o_orderkey = l1.l_orderkey
-      and s_nationkey = n_nationkey
-      and l1.l_receiptdate > l1.l_commitdate
+    where
+      s_nationkey = n_nationkey
+--       and s_suppkey = l1.l_suppkey
+--       and o_orderkey = l1.l_orderkey
+--       and o_orderstatus = 'F'
+--       and l1.l_receiptdate > l1.l_commitdate
       and n_name = 'ARGENTINA'
-      and o_orderstatus = 'F'
     group by
         s_name
 -- )

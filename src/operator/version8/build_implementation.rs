@@ -1,6 +1,7 @@
 use std::future::ready;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::SchemaRef;
@@ -9,9 +10,10 @@ use datafusion_common::DataFusionError;
 use datafusion_physical_expr::PhysicalExprRef;
 use datafusion_physical_plan::SendableRecordBatchStream;
 use futures::{StreamExt, TryStreamExt};
+use crate::operator::build_implementation::BuildVersion;
 use crate::operator::lookup_consumers::{IndexLookupProvider, SimpleIndexLookupProvider};
 
-use crate::operator::version8::hash_lookup_builder::LocalAccumulator;
+use crate::operator::version8::hash_lookup_builder::{LocalAccumulator, ReadOnlyJoinMap};
 use crate::operator::version8::parallel_join_execution_state::ParallelJoinExecutionState;
 use crate::shared::shared::{calculate_hash, evaluate_expressions};
 use crate::utils::async_initialize_once::AsyncInitializeOnce;
@@ -28,13 +30,18 @@ impl Version8 {
             state: ParallelJoinExecutionState::new(parallelism),
         }
     }
+}
 
-    pub async fn build_lookup_map(
+#[async_trait]
+impl BuildVersion for Version8 {
+    type Map = Arc<ReadOnlyJoinMap>;
+
+    async fn build_lookup_map(
         &self,
         partition: usize,
         build_side_stream: SendableRecordBatchStream,
         build_expressions: &Vec<PhysicalExprRef>,
-    ) -> Result<impl IndexLookupProvider, DataFusionError> {
+    ) -> Result<(Arc<ReadOnlyJoinMap>, RecordBatch), DataFusionError> {
         let mut state = self.state.take(partition)
             .ok_or(DataFusionError::Internal(format!("State already consumed for partition {}", partition)))?;
 
@@ -45,7 +52,7 @@ impl Version8 {
         let compactor = state.accumulator.submit();
         let (build_side_records, read_only_join_map) = compactor.compact(build_side_schema).await?;
 
-        Ok(SimpleIndexLookupProvider::new(read_only_join_map, build_side_records))
+        Ok((read_only_join_map, build_side_records))
     }
 }
 

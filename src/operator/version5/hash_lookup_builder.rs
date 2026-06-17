@@ -293,7 +293,7 @@ impl SharedCompactor {
         }
     }
 
-    pub async fn compact(self, schema: SchemaRef) -> Result<(RecordBatch, impl IndexLookup<u64>), DataFusionError> {
+    pub async fn compact(self, schema: SchemaRef) -> Result<(RecordBatch, Arc<ReadOnlyJoinMap>), DataFusionError> {
         // Adds the contents of each shard to the global store at the index corresponding to this instance (maybe if this is the last writer to a shard, mark it as ready for compaction)
         Self::publish_local_shard_contents(
             self.shared_shard_contents,

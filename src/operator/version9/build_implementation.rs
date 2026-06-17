@@ -1,6 +1,8 @@
 use std::future::ready;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use crate::operator::build_implementation::BuildVersion;
 use crate::operator::lookup_consumers::{IndexLookupProvider, SimpleIndexLookupProvider};
 use crossbeam::atomic::AtomicCell;
 use datafusion::arrow::array::RecordBatch;
@@ -29,13 +31,18 @@ impl Version9 {
             state: ParallelJoinExecutionState::new(parallelism),
         }
     }
+}
 
-    pub async fn build_lookup_map(
+#[async_trait]
+impl BuildVersion for Version9 {
+    type Map = Arc<ReadOnlyJoinMap>;
+
+    async fn build_lookup_map(
         &self,
         partition: usize,
         build_side_stream: SendableRecordBatchStream,
         build_expressions: &Vec<PhysicalExprRef>,
-    ) -> Result<impl IndexLookupProvider, DataFusionError> {
+    ) -> Result<(Arc<ReadOnlyJoinMap>, RecordBatch), DataFusionError> {
         // let i = self.state.take(partition);
         let mut state = self.state.take(partition)
             .ok_or(DataFusionError::Internal(format!("State already consumed for partition {}", partition)))?;
@@ -53,7 +60,7 @@ impl Version9 {
 
         // println!("Build side complete: {}", read_only_join_map.entry_count());
 
-        Ok(SimpleIndexLookupProvider::new(read_only_join_map, build_side_records))
+        Ok((read_only_join_map, build_side_records))
         // Ok(consume.call(read_only_join_map, build_side_records))
     }
 }

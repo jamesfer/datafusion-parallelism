@@ -1,0 +1,37 @@
+taskGroups:
+  - taskSpec:
+      runnables:
+        - container:
+            imageUri: __DOCKER_IMAGE__
+            entrypoint: /bin/bash
+            commands:
+              - tpc/scripts/_docker_entrypoint.sh
+          environment:
+            variables:
+              DATA_SOURCE: "__DATA_SOURCE__"
+              RESULTS_DEST: "__RESULTS_DEST__"
+              ITERATIONS: "__ITERATIONS__"
+              SCALE_FACTOR: "__SCALE_FACTOR__"
+              CONCURRENCY: "__CONCURRENCY__"
+              QUERY: "__QUERY__"
+              EXCLUDE_QUERIES: "__EXCLUDE_QUERIES__"
+              JOIN_VERSION: "__JOIN_VERSION__"
+      computeResource:
+        cpuMilli: __CPU_MILLI__
+        memoryMib: __MEMORY_MIB__
+      maxRetryCount: 0
+      maxRunDuration: 7200s
+    taskCount: 1
+    parallelism: 1
+allocationPolicy:
+  instances:
+    - policy:
+        machineType: __MACHINE_TYPE__
+        provisioningModel: __PROVISIONING_MODEL__
+        bootDisk:
+          type: hyperdisk-balanced
+          sizeGb: __BOOT_DISK_SIZE_GB__
+  serviceAccount:
+    email: default
+logsPolicy:
+  destination: CLOUD_LOGGING

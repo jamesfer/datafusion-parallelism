@@ -20,7 +20,7 @@ use datafusion::execution::runtime_env::RuntimeEnv;
 use structopt::clap::arg_enum;
 use structopt::StructOpt;
 use tokio::time::Instant;
-use datafusion_parallelism::operator::use_parallel_hash_join_rule::UseParallelHashJoinRule;
+use datafusion_parallelism::operator::rules::use_parallel_hash_join_rule::UseParallelHashJoinRule;
 use datafusion_parallelism::utils::static_table::StaticTable;
 
 arg_enum! {
@@ -299,7 +299,8 @@ async fn run(
     let mut w = File::create(&format!("{}/results.csv", output_path))?;
     w.write(format!("setup,{}\n", results.register_tables_time).as_bytes())?;
     for (query, times) in &results.query_times {
-        w.write(format!("q{},{}\n", query, times[0]).as_bytes())?;
+        let avg_time = times.iter().map(|time| *time as f64).sum::<f64>() / times.len() as f64;
+        w.write(format!("q{},{}\n", query, avg_time).as_bytes())?;
     }
 
     Ok(())
@@ -372,7 +373,7 @@ pub async fn execute_query(
                 }
 
                 let physical_plan = df.clone().create_physical_plan().await?;
-                let formatted_physical_plan = format!("{}", displayable(physical_plan.as_ref()).indent(false));
+                let formatted_physical_plan = format!("{}", displayable(physical_plan.as_ref()).set_show_statistics(true).indent(false));
                 if debug {
                     println!("{}", formatted_physical_plan);
                 }

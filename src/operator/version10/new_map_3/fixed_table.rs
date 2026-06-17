@@ -746,40 +746,80 @@ where
     P: ProbeSequence,
 {
     #[inline(always)]
-    pub unsafe fn get_in_bulk_group_n<const N: usize>(&self, hashes: &[u64; N], output: &mut [Option<V>; N]) {
-        // let capacity_mask = <G as BulkGroupStrategy32>::ProbeSeq::load_capacity_mask(self.bucket_mask);
-        let indices = <G as BulkGroupStrategyN>::ProbeSeq::start_indices(hashes, self.bucket_mask);
-
-        // let indices = hashes.iter().map(|hash| *hash & (self.bucket_mask as u64)).collect::<Vec<_>>();
-        let mut search_tags = G::get_tags(hashes);
-
-        // let search_hashes = hashes.iter().map(|hash| hash | HASH_OCCUPIED_BIT).collect::<Vec<_>>();
-
+    pub unsafe fn get_in_bulk_group_n<const N: usize>(&self, hashes: &[u64; N], output: [&mut Option<V>; N]) {
+        let search_tags = G::get_tags(hashes);
         let mut search_hashes = [0u64; N];
         for (hash, output) in hashes.iter().zip(search_hashes.iter_mut()) {
             *output = hash | HASH_OCCUPIED_BIT
         }
-        let strides = [0usize; N];
 
-        for (((((search_tag, search_hash), hash), index), mut stride), output) in search_tags.into_iter()
+        let indices = <G as BulkGroupStrategyN>::ProbeSeq::start_indices(hashes, self.bucket_mask);
+
+        // Perform load and first match in a branchless loop
+        let group_and_match = search_tags.into_iter()
+            .zip(indices.iter())
+            .map(|(search_tag, index)| {
+                let group = G::load_ptr(self.tag_group_ptr(*index as usize));
+                let mat = G::match_tag(&group, search_tag);
+                (group, mat.into_iter())
+            })
+            .collect::<Vec<_>>();
+
+        let strides = [0usize; N];
+        for ((((((search_tag, search_hash), hash), index), mut stride), (group, mat)), output) in search_tags.into_iter()
             .zip(search_hashes.into_iter())
             .zip(hashes.into_iter())
             .zip(indices.into_iter())
             .zip(strides.into_iter())
-            .zip(output.iter_mut()) {
+            .zip(group_and_match.into_iter())
+            .zip(output.into_iter()) {
             let mut index = index as usize;
-            *output = self.inner_loop_n(search_tag, search_hash, *hash, &mut index, &mut stride).cloned();
+            *output = self.inner_loop_n(
+                search_tag,
+                search_hash,
+                *hash,
+                group,
+                mat,
+                &mut index,
+                &mut stride).cloned();
         }
     }
 
     #[inline(always)]
-    unsafe fn inner_loop_n(&self, search_tag: u8, search_hash: u64, hash: u64, index: &mut usize, stride: &mut usize) -> Option<&V> {
-        // let search_hash = hash | HASH_OCCUPIED_BIT;
+    unsafe fn inner_loop_n(
+        &self,
+        search_tag: u8,
+        search_hash: u64,
+        hash: u64,
+        group: G::Group,
+        mat: impl Iterator<Item = usize>,
+        index: &mut usize,
+        stride: &mut usize,
+    ) -> Option<&V> {
+        // Check if the search tag appears in the chunk's tags
+        for position in mat {
+            let item_index = (*index + position) & self.bucket_mask;
+            let item = self.data_ref(item_index);
+            if item.0 == search_hash {
+                // Found a match
+                return Some(&item.1);
+            }
+        }
+
+        // Check if we are at the end of the probe chain
+        if G::contains_empty_slot(&group) {
+            return None;
+        }
+
+        // Probe to the next group
+        *index = P::next(*index, stride, hash, search_tag, self.bucket_mask);
+
         loop {
             let group = G::load_ptr(self.tag_group_ptr(*index));
+            let mat = G::match_tag(&group, search_tag).into_iter();
 
             // Check if the search tag appears in the chunk's tags
-            for position in G::match_tag(&group, search_tag) {
+            for position in mat {
                 let item_index = (*index + position) & self.bucket_mask;
                 let item = self.data_ref(item_index);
                 if item.0 == search_hash {
@@ -1121,7 +1161,7 @@ where
     P: ProbeSequenceBulkN + ProbeSequence,
 {
     #[inline(always)]
-    pub fn get_in_bulk_static_n<const N: usize>(&self, hashes: &[u64; N], output: &mut [Option<V>; N]) {
+    pub fn get_in_bulk_static_n<const N: usize>(&self, hashes: &[u64; N], output: [&mut Option<V>; N]) {
         // The read operation is safe to perform concurrently on the inner table since we know there
         // are no writes happening concurrently.
         unsafe {

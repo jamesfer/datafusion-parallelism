@@ -4,7 +4,7 @@ use datafusion_common::config::ConfigOptions;
 use datafusion_common::DataFusionError;
 use datafusion_common::tree_node::{Transformed, TreeNode};
 use datafusion_physical_plan::ExecutionPlan;
-use crate::operator::parallel_hash_join::ParallelHashJoin;
+use crate::operator::parallel_hash_join_exec::ParallelHashJoinExec;
 use crate::operator::work_stealing_repartition_exec::WorkStealingRepartitionExec;
 
 pub struct UseWorkStealingRepartitionRule;
@@ -13,7 +13,7 @@ impl PhysicalOptimizerRule for UseWorkStealingRepartitionRule {
     fn optimize(&self, plan: Arc<dyn ExecutionPlan>, config: &ConfigOptions) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let mut id = 0;
         Ok(plan.transform(|plan| {
-            match plan.as_any().downcast_ref::<ParallelHashJoin>() {
+            match plan.as_any().downcast_ref::<ParallelHashJoinExec>() {
                 Some(parallel_join) => {
                     let (replaced, new_children) = parallel_join.children().into_iter()
                         .map(|child| -> (bool, Arc<dyn ExecutionPlan>) {

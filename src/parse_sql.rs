@@ -7,7 +7,7 @@ use datafusion::physical_optimizer::optimizer::PhysicalOptimizer;
 use datafusion_common::config::ConfigOptions;
 use datafusion_common::DataFusionError;
 use datafusion_physical_plan::ExecutionPlan;
-use crate::operator::use_parallel_hash_join_rule::UseParallelHashJoinRule;
+use crate::operator::rules::use_parallel_hash_join_rule::UseParallelHashJoinRule;
 
 #[derive(Debug, Clone)]
 pub enum JoinReplacement {

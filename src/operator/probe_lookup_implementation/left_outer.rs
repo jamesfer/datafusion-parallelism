@@ -45,9 +45,9 @@ impl LeftOuterProbeLookupStream {
         filter: Option<JoinFilter>,
         build_side_records: RecordBatch,
         read_only_join_map: Lookup
-    ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
+    ) -> Result<impl PlainRecordBatchStream, DataFusionError>
         where Lookup: IndexLookup<u64> + Send + Sync + 'static {
-        Ok(Box::pin(left_outer_join_streaming_lookup(
+        Ok(left_outer_join_streaming_lookup(
             join_schema,
             probe_stream,
             probe_expressions,
@@ -58,7 +58,7 @@ impl LeftOuterProbeLookupStream {
             &self.build_side_visited_initializer,
             self.finalizer_copies.get_clone_or_initialize(|| ())
                 .map_err(|err| DataFusionError::Internal(err))?,
-        )))
+        ))
     }
 }
 

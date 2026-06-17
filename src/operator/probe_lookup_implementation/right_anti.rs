@@ -32,9 +32,9 @@ impl RightAntiProbeLookupStream {
         filter: Option<JoinFilter>,
         build_side_records: RecordBatch,
         read_only_join_map: Lookup
-    ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
+    ) -> Result<impl PlainRecordBatchStream, DataFusionError>
         where Lookup: IndexLookup<u64> + Send + Sync + 'static {
-        Ok(Box::pin(right_anti_join_streaming_lookup(
+        Ok(right_anti_join_streaming_lookup(
             join_schema,
             probe_stream,
             probe_expressions,
@@ -42,7 +42,7 @@ impl RightAntiProbeLookupStream {
             filter,
             build_side_records,
             read_only_join_map,
-        )))
+        ))
     }
 }
 

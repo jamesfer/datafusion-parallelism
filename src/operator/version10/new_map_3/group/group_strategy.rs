@@ -15,7 +15,7 @@ pub trait GroupStrategy {
     fn get_tag(hash: u64) -> u8;
 
     // Searches the group for a specific tag
-    unsafe fn match_tag(group: &Self::Group, search_tag: u8) -> impl IntoIterator<Item=usize>;
+    unsafe fn match_tag(group: &Self::Group, search_tag: u8) -> impl IntoIterator<Item=usize> + use<Self>;
     unsafe fn match_empty(group: &Self::Group) -> impl IntoIterator<Item=usize>;
     unsafe fn contains_empty_slot(group: &Self::Group) -> bool;
 
@@ -48,12 +48,9 @@ pub trait BulkGroupStrategyN: GroupStrategy {
     type ProbeSeq: ProbeSequenceBulkN;
     type TagIt: IntoIterator<Item=usize>;
 
-    #[inline(always)]
     unsafe fn get_tags<const N: usize>(hashes: &[u64; N]) -> [u8; N];
 
-    #[inline(always)]
     unsafe fn match_tag_n<const N: usize>(group: &[*const u8; N], search_tag: &[u8; N]) -> [Self::TagIt; N];
 
-    #[inline(always)]
     unsafe fn match_tag_1(group: &Self::Group, search_tag: u8) -> Self::TagIt;
 }

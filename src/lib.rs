@@ -29,7 +29,7 @@ mod tests {
     use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
     use datafusion_physical_plan::streaming::PartitionStream;
     use crate::api_utils::{make_int_array, make_int_array_from_range, make_int_array_it, make_int_array_it_nullable, make_string_array, make_string_array_nullable, make_string_constant_array};
-    use crate::operator::parallel_hash_join::ParallelHashJoin;
+    use crate::operator::parallel_hash_join_exec::ParallelHashJoinExec;
     use crate::parse_sql::{JoinReplacement, make_session_state, parse_sql, make_session_state_with_config};
     use crate::utils::static_table::StaticTable;
 
@@ -736,13 +736,13 @@ mod tests {
         } else {
             // Try the top child, or the first child if it is a coalesce batches
             let any_plan = plan.as_any();
-            any_plan.downcast_ref::<ParallelHashJoin>()
+            any_plan.downcast_ref::<ParallelHashJoinExec>()
                 .map(|parallel_join| parallel_join.join_type().clone())
                 .or_else(|| any_plan.downcast_ref::<CoalesceBatchesExec>()
                     .and_then(|coalesce_batches| {
                         match coalesce_batches.children().first() {
                             None => None,
-                            Some(child) => match child.as_any().downcast_ref::<ParallelHashJoin>() {
+                            Some(child) => match child.as_any().downcast_ref::<ParallelHashJoinExec>() {
                                 None => None,
                                 Some(parallel_join) => Some(parallel_join.join_type().clone()),
                             }

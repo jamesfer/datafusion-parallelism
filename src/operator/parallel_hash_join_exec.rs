@@ -1,20 +1,19 @@
-use std::any::Any;
-use std::fmt::{Debug, Formatter};
-use std::sync::{Arc, OnceLock};
+use crate::operator::parallel_hash_join_executor::ParallelHashJoinExecutor;
+use crate::operator::work_stealing_repartition_exec::WorkStealingRepartitionExec;
+use crate::parse_sql::JoinReplacement;
 use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::error::Result;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_common::JoinType;
 use datafusion_physical_expr::{Distribution, EquivalenceProperties, Partitioning, PhysicalExprRef};
-use datafusion_physical_plan::joins::{HashJoinExec, PartitionMode};
-use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties};
 use datafusion_physical_plan::joins::utils::{build_join_schema, JoinFilter};
-use crate::operator::parallel_hash_join_executor::ParallelHashJoinExecutor;
-use crate::operator::probe_lookup_implementation::probe_lookup_implementation::ProbeLookupStreamImplementation;
-use crate::operator::work_stealing_repartition_exec::WorkStealingRepartitionExec;
-use crate::parse_sql::JoinReplacement;
+use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties};
+use std::any::Any;
+use std::fmt::{Debug, Formatter};
+use std::sync::{Arc, OnceLock};
 
 #[derive(Debug)]
-pub struct ParallelHashJoin {
+pub struct ParallelHashJoinExec {
     properties: PlanProperties,
     left: Arc<dyn ExecutionPlan>,
     right: Arc<dyn ExecutionPlan>,
@@ -25,7 +24,7 @@ pub struct ParallelHashJoin {
     executor_instance: Arc<OnceLock<ParallelHashJoinExecutor>>,
 }
 
-impl ParallelHashJoin {
+impl ParallelHashJoinExec {
     pub fn new(
         left: Arc<dyn ExecutionPlan>,
         right: Arc<dyn ExecutionPlan>,
@@ -61,7 +60,7 @@ impl ParallelHashJoin {
 
 }
 
-impl DisplayAs for ParallelHashJoin {
+impl DisplayAs for ParallelHashJoinExec {
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         let schema = self.schema();
         let columns = schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>();
@@ -69,9 +68,9 @@ impl DisplayAs for ParallelHashJoin {
     }
 }
 
-impl ExecutionPlan for ParallelHashJoin {
+impl ExecutionPlan for ParallelHashJoinExec {
     fn name(&self) -> &str {
-        "ParallelHashJoin"
+        "ParallelHashJoinExec"
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -93,10 +92,10 @@ impl ExecutionPlan for ParallelHashJoin {
         vec![&self.left, &self.right]
     }
 
-    fn with_new_children(self: Arc<Self>, children: Vec<Arc<dyn ExecutionPlan>>) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
+    fn with_new_children(self: Arc<Self>, children: Vec<Arc<dyn ExecutionPlan>>) -> Result<Arc<dyn ExecutionPlan>> {
         let left = Arc::clone(&children[0]);
-        Ok(Arc::new(ParallelHashJoin {
-            properties: ParallelHashJoin::compute_properties(self.schema().clone(), &left),
+        Ok(Arc::new(ParallelHashJoinExec {
+            properties: ParallelHashJoinExec::compute_properties(self.schema().clone(), &left),
             left,
             right: Arc::clone(&children[1]),
             on: self.on.clone(),
@@ -108,7 +107,7 @@ impl ExecutionPlan for ParallelHashJoin {
         }))
     }
 
-    fn execute(&self, partition: usize, context: Arc<TaskContext>) -> datafusion_common::Result<SendableRecordBatchStream> {
+    fn execute(&self, partition: usize, context: Arc<TaskContext>) -> Result<SendableRecordBatchStream> {
         let parallelism = self.properties.output_partitioning().partition_count();
 
         // Initialize the executor instance so all partitions can share state

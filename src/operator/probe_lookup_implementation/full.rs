@@ -1,5 +1,6 @@
 use std::sync::{Arc, OnceLock};
 use std::vec::IntoIter;
+use datafusion::error::Result;
 use datafusion::arrow;
 use datafusion::arrow::array::{ArrayRef, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Schema, SchemaRef};
@@ -11,6 +12,7 @@ use datafusion_physical_plan::joins::utils::JoinFilter;
 use futures::stream::{iter, Iter};
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
+use futures_core::Stream;
 use crate::shared::datafusion_private::{append_right_indices, apply_join_filter_to_indices, equal_rows_arr};
 use crate::shared::shared::{calculate_hash, evaluate_expressions, get_matching_indices_with_probe, take_multiple_record_batch, ProbeBuildIndices};
 use crate::utils::concurrent_bit_set::ConcurrentBitSet;
@@ -44,9 +46,9 @@ impl FullJoinProbeLookupStream {
         filter: Option<JoinFilter>,
         build_side_records: RecordBatch,
         read_only_join_map: Lookup
-    ) -> Result<SendablePlainRecordBatchStream, DataFusionError>
+    ) -> Result<impl PlainRecordBatchStream>
         where Lookup: IndexLookup<u64> + Sync + Send + 'static {
-        Ok(Box::pin(full_join_streaming_lookup(
+        Ok(full_join_streaming_lookup(
             output_schema,
             read_only_join_map,
             probe_stream,
@@ -57,7 +59,7 @@ impl FullJoinProbeLookupStream {
             &self.build_side_visited_initializer,
             self.finalizer_copies.get_clone_or_initialize(|| ())
                 .map_err(|err| DataFusionError::Internal(err))?,
-        )))
+        ))
     }
 }
 
